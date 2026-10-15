@@ -65,7 +65,7 @@ class WalletScreen extends StatefulWidget {
 class _WalletScreenState extends State<WalletScreen> {
   static const int startingCapital = 10000;
 
-  // Sample transactions (chronological: oldest to newest)
+  // Active transactions (chronological: oldest to newest)
   final List<Transaction> transactions = [
     Transaction(
       id: 'tx_1',
@@ -97,7 +97,10 @@ class _WalletScreenState extends State<WalletScreen> {
     ),
   ];
 
-  String filter = 'All'; // 'All', 'IN', 'OUT'
+  // List holding deleted transactions
+  final List<Transaction> deletedTransactions = [];
+
+  String filter = 'All'; // 'All', 'IN', 'OUT', 'DELETED'
 
   // --- Calculations ---
   int get currentBalance {
@@ -235,16 +238,18 @@ class _WalletScreenState extends State<WalletScreen> {
     final index = transactions.indexOf(tx);
     setState(() {
       transactions.remove(tx);
+      deletedTransactions.add(tx);
     });
 
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('${tx.title} deleted'),
+        content: Text('${tx.title} deleted (moved to DELETED)'),
         action: SnackBarAction(
           label: 'Undo',
           onPressed: () {
             setState(() {
+              deletedTransactions.remove(tx);
               transactions.insert(index, tx);
             });
           },
@@ -253,15 +258,32 @@ class _WalletScreenState extends State<WalletScreen> {
     );
   }
 
+  void restoreTransaction(Transaction tx) {
+    setState(() {
+      deletedTransactions.remove(tx);
+      transactions.add(tx);
+    });
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${tx.title} restored to wallet')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Newest transactions first for display
     final List<Transaction> reversedList = transactions.reversed.toList();
-    final List<Transaction> filteredList = reversedList.where((tx) {
-      if (filter == 'IN') return tx.isIncoming;
-      if (filter == 'OUT') return !tx.isIncoming;
-      return true;
-    }).toList();
+    final List<Transaction> filteredList;
+
+    if (filter == 'DELETED') {
+      filteredList = deletedTransactions.reversed.toList();
+    } else {
+      filteredList = reversedList.where((tx) {
+        if (filter == 'IN') return tx.isIncoming;
+        if (filter == 'OUT') return !tx.isIncoming;
+        return true;
+      }).toList();
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -404,7 +426,7 @@ class _WalletScreenState extends State<WalletScreen> {
 
           const SizedBox(height: 12),
 
-          // Filter Chips
+          // Filter Chips (Scrollable row with DELETED chip)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
@@ -413,23 +435,39 @@ class _WalletScreenState extends State<WalletScreen> {
                   'Transactions',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
-                const Spacer(),
-                ChoiceChip(
-                  label: const Text('All'),
-                  selected: filter == 'All',
-                  onSelected: (_) => setState(() => filter = 'All'),
-                ),
-                const SizedBox(width: 6),
-                ChoiceChip(
-                  label: const Text('IN'),
-                  selected: filter == 'IN',
-                  onSelected: (_) => setState(() => filter = 'IN'),
-                ),
-                const SizedBox(width: 6),
-                ChoiceChip(
-                  label: const Text('OUT'),
-                  selected: filter == 'OUT',
-                  onSelected: (_) => setState(() => filter = 'OUT'),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        ChoiceChip(
+                          label: const Text('All'),
+                          selected: filter == 'All',
+                          onSelected: (_) => setState(() => filter = 'All'),
+                        ),
+                        const SizedBox(width: 6),
+                        ChoiceChip(
+                          label: const Text('IN'),
+                          selected: filter == 'IN',
+                          onSelected: (_) => setState(() => filter = 'IN'),
+                        ),
+                        const SizedBox(width: 6),
+                        ChoiceChip(
+                          label: const Text('OUT'),
+                          selected: filter == 'OUT',
+                          onSelected: (_) => setState(() => filter = 'OUT'),
+                        ),
+                        const SizedBox(width: 6),
+                        ChoiceChip(
+                          label: Text('DELETED (${deletedTransactions.length})'),
+                          selected: filter == 'DELETED',
+                          selectedColor: Colors.red[100],
+                          onSelected: (_) => setState(() => filter = 'DELETED'),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -440,16 +478,62 @@ class _WalletScreenState extends State<WalletScreen> {
           // Transactions List
           Expanded(
             child: filteredList.isEmpty
-                ? const Center(
+                ? Center(
                     child: Text(
-                      'No transactions to display',
-                      style: TextStyle(color: Colors.grey, fontSize: 16),
+                      filter == 'DELETED'
+                          ? 'No deleted transactions'
+                          : 'No transactions to display',
+                      style: const TextStyle(color: Colors.grey, fontSize: 16),
                     ),
                   )
                 : ListView.builder(
                     itemCount: filteredList.length,
                     itemBuilder: (context, index) {
                       final tx = filteredList[index];
+
+                      if (filter == 'DELETED') {
+                        // Deleted view: greyed out with Restore button
+                        return ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.grey[300],
+                            child: const Icon(Icons.delete_outline, color: Colors.grey),
+                          ),
+                          title: Text(
+                            tx.title,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              decoration: TextDecoration.lineThrough,
+                              color: Colors.grey,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'Deleted · ${tx.date.day}/${tx.date.month}/${tx.date.year}',
+                            style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '${tx.isIncoming ? '+' : '-'}${tx.amount} RWF',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                  color: Colors.grey,
+                                  decoration: TextDecoration.lineThrough,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              IconButton(
+                                icon: const Icon(Icons.restore, color: Colors.blue),
+                                tooltip: 'Restore to Wallet',
+                                onPressed: () => restoreTransaction(tx),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+
+                      // Active view: Dismissible with delete
                       return Dismissible(
                         key: Key(tx.id),
                         direction: DismissDirection.endToStart,
@@ -495,6 +579,7 @@ class _WalletScreenState extends State<WalletScreen> {
                               ),
                               IconButton(
                                 icon: const Icon(Icons.delete_outline, size: 20),
+                                tooltip: 'Delete',
                                 onPressed: () => deleteTransaction(tx),
                               ),
                             ],
@@ -531,7 +616,6 @@ class _SendMoneyScreenState extends State<SendMoneyScreen> {
     final amountText = amountController.text.trim();
     final amount = int.tryParse(amountText);
 
-    // Rule 1: Check phone number digits
     if (phone.length != 10 || !RegExp(r'^\d{10}$').hasMatch(phone)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Phone number must be exactly 10 digits')),
@@ -539,7 +623,6 @@ class _SendMoneyScreenState extends State<SendMoneyScreen> {
       return;
     }
 
-    // Rule 2: Check phone starts with 078 or 079
     if (!phone.startsWith('078') && !phone.startsWith('079')) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Phone number must start with 078 or 079 (MTN)')),
@@ -547,7 +630,6 @@ class _SendMoneyScreenState extends State<SendMoneyScreen> {
       return;
     }
 
-    // Rule 3: Valid integer amount
     if (amount == null || amount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a valid amount')),
@@ -555,7 +637,6 @@ class _SendMoneyScreenState extends State<SendMoneyScreen> {
       return;
     }
 
-    // Rule 4: Minimum amount 100 RWF
     if (amount < 100) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Minimum transfer amount is 100 RWF')),
@@ -563,7 +644,6 @@ class _SendMoneyScreenState extends State<SendMoneyScreen> {
       return;
     }
 
-    // Rule 5: Cannot exceed balance
     if (amount > widget.currentBalance) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Insufficient balance')),
@@ -571,7 +651,6 @@ class _SendMoneyScreenState extends State<SendMoneyScreen> {
       return;
     }
 
-    // Success -> Return new OUT transaction
     Navigator.pop(
       context,
       Transaction(
@@ -678,7 +757,6 @@ class _CashOutScreenState extends State<CashOutScreen> {
       return;
     }
 
-    // Rwandan notes: 5000, 2000, 1000, 500, 100
     final notes = [5000, 2000, 1000, 500, 100];
     final Map<int, int> breakdown = {};
     int remaining = amount;

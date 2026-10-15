@@ -12,9 +12,10 @@ Built upon logic from **Labs 2, 3, and 6** of the Mobile Programming course.
    - Available balance card with quick actions: **Send**, **Cash Out**, and **Receive**.
    - Real-time statistics: **Total IN** (green), **Total OUT** (red), and **Lowest Balance Ever Reached**.
    - Transaction history sorted from newest to oldest.
-2. **Transaction Filtering**:
-   - Filter chips to view **All**, **IN** (incoming cash), or **OUT** (outgoing transfers & cash-outs).
-   - Empty state handling displaying *"No transactions to display"* when a filter has no items.
+2. **Transaction Filtering & Recycle Bin**:
+   - Filter chips to view **All**, **IN** (incoming cash), **OUT** (outgoing transfers & cash-outs), and **DELETED** with real-time count `DELETED (n)`.
+   - Dedicated deleted items view showing strikethrough styling and a one-tap **Restore** button (`Icons.restore`) to bring any removed transaction back into the active wallet.
+   - Clean empty state handling displaying *"No transactions to display"* or *"No deleted transactions"*.
 3. **Send Money Screen (Lab 2)**:
    - Dedicated transfer screen with balance check.
    - Strict phone number validation: exactly 10 digits and must start with MTN prefixes (`078` or `079`).
@@ -27,8 +28,9 @@ Built upon logic from **Labs 2, 3, and 6** of the Mobile Programming course.
 5. **Receive Money**:
    - Quick modal dialog to simulate incoming deposits and peer transfers with description and amount.
 6. **Undo & History Integrity Protection (Lab 3)**:
-   - Any transaction can be deleted with an **Undo** action via a `SnackBar`.
+   - Any transaction can be swiped to delete, moving it to the deleted pool with an instant **Undo** action via a `SnackBar`.
    - History safety check: prevents deleting an incoming transaction if doing so would cause the wallet balance to drop below 0 RWF at any point in historical records.
+   - Deleted items remain accessible and restorable at any time under the **DELETED** filter.
 
 ---
 
