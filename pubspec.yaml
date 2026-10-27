@@ -1,5 +1,5 @@
 name: momo_wallet
-description: "MoMo Wallet: MTN Mobile Money wallet simulation app in Flutter"
+description: "MoMo Wallet: MTN Mobile Money wallet simulation app in Flutter with offline persistence and live weather"
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -11,6 +11,8 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.6
+  http: ^1.1.0
+  shared_preferences: ^2.2.0
 
 dev_dependencies:
   flutter_test:

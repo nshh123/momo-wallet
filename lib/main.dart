@@ -1,11 +1,14 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(const MoMoApp());
 }
 
 // ==========================================
-// 1. MODEL
+// 1. MODELS & PERSISTENCE
 // ==========================================
 class Transaction {
   Transaction({
@@ -21,10 +24,119 @@ class Transaction {
   final int amount;
   final bool isIncoming;
   final DateTime date;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'amount': amount,
+      'isIncoming': isIncoming,
+      'date': date.toIso8601String(),
+    };
+  }
+
+  factory Transaction.fromJson(Map<String, dynamic> json) {
+    return Transaction(
+      id: json['id'] as String,
+      title: json['title'] as String,
+      amount: (json['amount'] as num).toInt(),
+      isIncoming: json['isIncoming'] as bool,
+      date: DateTime.parse(json['date'] as String),
+    );
+  }
+}
+
+class LiveWeather {
+  LiveWeather({
+    required this.temperature,
+    required this.humidity,
+    required this.code,
+    required this.time,
+  });
+
+  final double temperature;
+  final int humidity;
+  final int code;
+  final String time;
+
+  factory LiveWeather.fromJson(Map<String, dynamic> json) {
+    return LiveWeather(
+      temperature: (json['temperature_2m'] as num).toDouble(),
+      humidity: (json['relative_humidity_2m'] as num).toInt(),
+      code: (json['weather_code'] as num).toInt(),
+      time: (json['time'] as String?) ?? '',
+    );
+  }
 }
 
 // ==========================================
-// 2. ROOT APP
+// 2. BULLETPROOF STORAGE SERVICE (DartPad Safe)
+// ==========================================
+class StorageService {
+  static final Map<String, String> _memory = {};
+
+  static Future<void> setString(String key, String value) async {
+    _memory[key] = value;
+    try {
+      final prefs = await SharedPreferences.getInstance()
+          .timeout(const Duration(milliseconds: 1200));
+      await prefs.setString(key, value);
+    } catch (_) {}
+  }
+
+  static Future<String?> getString(String key) async {
+    try {
+      final prefs = await SharedPreferences.getInstance()
+          .timeout(const Duration(milliseconds: 1200));
+      final val = prefs.getString(key);
+      if (val != null) return val;
+    } catch (_) {}
+    return _memory[key];
+  }
+}
+
+// ==========================================
+// 3. WEATHER HELPER & API CALL
+// ==========================================
+String describeWeather(int code) {
+  if (code == 0) return 'Clear';
+  if (code <= 2) return 'Partly cloudy';
+  if (code == 3) return 'Cloudy';
+  if (code == 45 || code == 48) return 'Foggy';
+  if (code >= 51 && code <= 67) return 'Rainy';
+  if (code >= 80 && code <= 82) return 'Showers';
+  if (code >= 95) return 'Stormy';
+  return 'Fair';
+}
+
+IconData iconForWeather(int code) {
+  if (code == 0) return Icons.wb_sunny;
+  if (code <= 3) return Icons.cloud;
+  if (code == 45 || code == 48) return Icons.foggy;
+  if (code >= 95) return Icons.thunderstorm;
+  if (code >= 51) return Icons.water_drop;
+  return Icons.wb_cloudy;
+}
+
+Future<LiveWeather> fetchKigaliWeather() async {
+  final url = Uri.parse(
+    'https://api.open-meteo.com/v1/forecast'
+    '?latitude=-1.9441&longitude=30.0619'
+    '&current=temperature_2m,relative_humidity_2m,weather_code'
+    '&timezone=Africa%2FKigali',
+  );
+
+  final response = await http.get(url).timeout(const Duration(seconds: 5));
+  if (response.statusCode != 200) {
+    throw Exception('Failed to load weather: ${response.statusCode}');
+  }
+
+  final data = jsonDecode(response.body) as Map<String, dynamic>;
+  return LiveWeather.fromJson(data['current'] as Map<String, dynamic>);
+}
+
+// ==========================================
+// 4. ROOT APP
 // ==========================================
 class MoMoApp extends StatelessWidget {
   const MoMoApp({super.key});
@@ -53,7 +165,7 @@ class MoMoApp extends StatelessWidget {
 }
 
 // ==========================================
-// 3. MAIN WALLET SCREEN
+// 5. MAIN WALLET SCREEN
 // ==========================================
 class WalletScreen extends StatefulWidget {
   const WalletScreen({super.key});
@@ -65,42 +177,111 @@ class WalletScreen extends StatefulWidget {
 class _WalletScreenState extends State<WalletScreen> {
   static const int startingCapital = 10000;
 
-  // Active transactions (chronological: oldest to newest)
-  final List<Transaction> transactions = [
-    Transaction(
-      id: 'tx_1',
-      title: 'Initial Deposit',
-      amount: 10000,
-      isIncoming: true,
-      date: DateTime.now().subtract(const Duration(days: 2)),
-    ),
-    Transaction(
-      id: 'tx_2',
-      title: 'Airtime purchase',
-      amount: 1000,
-      isIncoming: false,
-      date: DateTime.now().subtract(const Duration(days: 1, hours: 4)),
-    ),
-    Transaction(
-      id: 'tx_3',
-      title: 'Received from Eric',
-      amount: 5000,
-      isIncoming: true,
-      date: DateTime.now().subtract(const Duration(hours: 5)),
-    ),
-    Transaction(
-      id: 'tx_4',
-      title: 'Electricity token',
-      amount: 4000,
-      isIncoming: false,
-      date: DateTime.now().subtract(const Duration(hours: 1)),
-    ),
-  ];
-
-  // List holding deleted transactions
-  final List<Transaction> deletedTransactions = [];
+  List<Transaction> transactions = [];
+  List<Transaction> deletedTransactions = [];
 
   String filter = 'All'; // 'All', 'IN', 'OUT', 'DELETED'
+
+  // Live Weather API States
+  LiveWeather? liveWeather;
+  bool weatherLoading = true;
+  String? weatherError;
+
+  @override
+  void initState() {
+    super.initState();
+    initApp();
+  }
+
+  Future<void> initApp() async {
+    await loadStoredTransactions();
+    await loadWeather();
+  }
+
+  // --- Persistence Methods ---
+  Future<void> loadStoredTransactions() async {
+    try {
+      final savedTxJson = await StorageService.getString('momo_transactions');
+      final savedDelJson = await StorageService.getString('momo_deleted_transactions');
+
+      if (savedTxJson != null) {
+        final list = jsonDecode(savedTxJson) as List;
+        transactions = list.map((x) => Transaction.fromJson(x as Map<String, dynamic>)).toList();
+      } else {
+        // Initial sample data if running for the first time
+        transactions = [
+          Transaction(
+            id: 'tx_1',
+            title: 'Initial Deposit',
+            amount: 10000,
+            isIncoming: true,
+            date: DateTime.now().subtract(const Duration(days: 2)),
+          ),
+          Transaction(
+            id: 'tx_2',
+            title: 'Airtime purchase',
+            amount: 1000,
+            isIncoming: false,
+            date: DateTime.now().subtract(const Duration(days: 1, hours: 4)),
+          ),
+          Transaction(
+            id: 'tx_3',
+            title: 'Received from Eric',
+            amount: 5000,
+            isIncoming: true,
+            date: DateTime.now().subtract(const Duration(hours: 5)),
+          ),
+          Transaction(
+            id: 'tx_4',
+            title: 'Electricity token',
+            amount: 4000,
+            isIncoming: false,
+            date: DateTime.now().subtract(const Duration(hours: 1)),
+          ),
+        ];
+        await saveStoredTransactions();
+      }
+
+      if (savedDelJson != null) {
+        final list = jsonDecode(savedDelJson) as List;
+        deletedTransactions = list.map((x) => Transaction.fromJson(x as Map<String, dynamic>)).toList();
+      }
+    } catch (_) {}
+
+    if (mounted) setState(() {});
+  }
+
+  Future<void> saveStoredTransactions() async {
+    final txList = transactions.map((t) => t.toJson()).toList();
+    final delList = deletedTransactions.map((t) => t.toJson()).toList();
+
+    await StorageService.setString('momo_transactions', jsonEncode(txList));
+    await StorageService.setString('momo_deleted_transactions', jsonEncode(delList));
+  }
+
+  // --- Live Weather API Call ---
+  Future<void> loadWeather() async {
+    setState(() {
+      weatherLoading = true;
+      weatherError = null;
+    });
+
+    try {
+      final w = await fetchKigaliWeather();
+      if (!mounted) return;
+      setState(() {
+        liveWeather = w;
+        weatherLoading = false;
+        weatherError = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        weatherLoading = false;
+        weatherError = 'Offline';
+      });
+    }
+  }
 
   // --- Calculations ---
   int get currentBalance {
@@ -143,6 +324,7 @@ class _WalletScreenState extends State<WalletScreen> {
     setState(() {
       transactions.add(tx);
     });
+    saveStoredTransactions();
   }
 
   void promptReceiveMoney() {
@@ -240,6 +422,7 @@ class _WalletScreenState extends State<WalletScreen> {
       transactions.remove(tx);
       deletedTransactions.add(tx);
     });
+    saveStoredTransactions();
 
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
@@ -252,6 +435,7 @@ class _WalletScreenState extends State<WalletScreen> {
               deletedTransactions.remove(tx);
               transactions.insert(index, tx);
             });
+            saveStoredTransactions();
           },
         ),
       ),
@@ -263,6 +447,7 @@ class _WalletScreenState extends State<WalletScreen> {
       deletedTransactions.remove(tx);
       transactions.add(tx);
     });
+    saveStoredTransactions();
 
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
@@ -297,6 +482,62 @@ class _WalletScreenState extends State<WalletScreen> {
             ),
           ],
         ),
+        actions: [
+          // Live API Weather Header Widget (3 States: Loading, Error with Retry, Data)
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Center(
+              child: weatherLoading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black54),
+                    )
+                  : weatherError != null
+                      ? InkWell(
+                          onTap: loadWeather,
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0x1F000000),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.wifi_off, size: 14, color: Colors.black87),
+                                SizedBox(width: 4),
+                                Text('Offline', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                          ),
+                        )
+                      : Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0x1A000000),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(iconForWeather(liveWeather!.code), size: 16, color: Colors.black87),
+                              const SizedBox(width: 5),
+                              Text(
+                                'Kigali ${liveWeather!.temperature.round()}°C',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+            ),
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -313,11 +554,11 @@ class _WalletScreenState extends State<WalletScreen> {
                   end: Alignment.bottomRight,
                 ),
                 borderRadius: BorderRadius.circular(20),
-                boxShadow: [
+                boxShadow: const [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.08),
+                    color: Color(0x14000000),
                     blurRadius: 10,
-                    offset: const Offset(0, 4),
+                    offset: Offset(0, 4),
                   ),
                 ],
               ),
@@ -547,8 +788,8 @@ class _WalletScreenState extends State<WalletScreen> {
                         child: ListTile(
                           leading: CircleAvatar(
                             backgroundColor: tx.isIncoming
-                                ? Colors.green.withOpacity(0.15)
-                                : Colors.red.withOpacity(0.15),
+                                ? const Color(0x264CAF50)
+                                : const Color(0x26F44336),
                             child: Icon(
                               tx.isIncoming
                                   ? Icons.arrow_downward
@@ -596,7 +837,7 @@ class _WalletScreenState extends State<WalletScreen> {
 }
 
 // ==========================================
-// 4. SEND MONEY SCREEN (LAB 2)
+// 6. SEND MONEY SCREEN (LAB 2)
 // ==========================================
 class SendMoneyScreen extends StatefulWidget {
   const SendMoneyScreen({super.key, required this.currentBalance});
@@ -685,7 +926,7 @@ class _SendMoneyScreenState extends State<SendMoneyScreen> {
               'Balance: ${widget.currentBalance} RWF',
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             TextField(
               controller: phoneController,
               keyboardType: TextInputType.phone,
@@ -728,7 +969,7 @@ class _SendMoneyScreenState extends State<SendMoneyScreen> {
 }
 
 // ==========================================
-// 5. CASH OUT SCREEN (LAB 6: NOTE BREAKDOWN)
+// 7. CASH OUT SCREEN (LAB 6: NOTE BREAKDOWN)
 // ==========================================
 class CashOutScreen extends StatefulWidget {
   const CashOutScreen({super.key, required this.currentBalance});
@@ -914,7 +1155,7 @@ class _CashOutScreenState extends State<CashOutScreen> {
 }
 
 // ==========================================
-// HELPER WIDGETS
+// 8. HELPER WIDGETS
 // ==========================================
 class _ActionButton extends StatelessWidget {
   const _ActionButton({
@@ -935,7 +1176,7 @@ class _ActionButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.08),
+          color: const Color(0x14000000),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(

@@ -3,7 +3,7 @@
 A mobile money wallet simulation app inspired by MTN Mobile Money in Rwanda, built with Flutter.
 
 ## Project Choice: Option 1 — MoMo Wallet
-Built upon logic from **Labs 2, 3, and 6** of the Mobile Programming course.
+Built upon logic from **Labs 2, 3, 6**, and **Session 5 (Persistence & Live API)** of the Mobile Programming course.
 
 ---
 
@@ -31,6 +31,16 @@ Built upon logic from **Labs 2, 3, and 6** of the Mobile Programming course.
    - Any transaction can be swiped to delete, moving it to the deleted pool with an instant **Undo** action via a `SnackBar`.
    - History safety check: prevents deleting an incoming transaction if doing so would cause the wallet balance to drop below 0 RWF at any point in historical records.
    - Deleted items remain accessible and restorable at any time under the **DELETED** filter.
+7. **Local Data Persistence (Session 5 Part 2)**:
+   - Persists all active transactions and deleted items using `SharedPreferences` with `toJson()` and `fromJson()` serialization.
+   - Changes (sends, cash-outs, incoming receipts, deletions, and undos) survive app restarts.
+   - Robust storage wrapper (`StorageService`) with timeout protection and in-memory fallback for web sandbox environments.
+8. **Live API Integration (Session 5 Part 2)**:
+   - Displays real-time Kigali weather in the header via the Open-Meteo REST API.
+   - Handles the three essential asynchronous UI states:
+     - **Loading**: Compact progress spinner.
+     - **Error**: Offline status pill with one-tap retry button.
+     - **Data**: Real-time sky condition icon and temperature (e.g., *Kigali 22°C*).
 
 ---
 
