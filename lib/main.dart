@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await StorageService.init();
   runApp(const MoMoApp());
 }
 
@@ -73,22 +75,34 @@ class LiveWeather {
 // 2. BULLETPROOF STORAGE SERVICE (DartPad Safe)
 // ==========================================
 class StorageService {
+  static SharedPreferences? _prefs;
   static final Map<String, String> _memory = {};
+
+  static Future<void> init() async {
+    try {
+      _prefs = await SharedPreferences.getInstance()
+          .timeout(const Duration(seconds: 4));
+    } catch (_) {}
+  }
 
   static Future<void> setString(String key, String value) async {
     _memory[key] = value;
     try {
-      final prefs = await SharedPreferences.getInstance()
-          .timeout(const Duration(milliseconds: 1200));
-      await prefs.setString(key, value);
+      if (_prefs == null) {
+        _prefs = await SharedPreferences.getInstance()
+            .timeout(const Duration(seconds: 4));
+      }
+      await _prefs?.setString(key, value);
     } catch (_) {}
   }
 
   static Future<String?> getString(String key) async {
     try {
-      final prefs = await SharedPreferences.getInstance()
-          .timeout(const Duration(milliseconds: 1200));
-      final val = prefs.getString(key);
+      if (_prefs == null) {
+        _prefs = await SharedPreferences.getInstance()
+            .timeout(const Duration(seconds: 4));
+      }
+      final val = _prefs?.getString(key);
       if (val != null) return val;
     } catch (_) {}
     return _memory[key];
@@ -280,6 +294,31 @@ class _WalletScreenState extends State<WalletScreen> {
       setState(() {});
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Demo transactions reset to default')),
+      );
+    }
+  }
+
+  Future<void> restartApp() async {
+    setState(() {
+      transactions = [];
+      deletedTransactions = [];
+    });
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Simulating app restart (loading saved data from storage)...'),
+        duration: Duration(milliseconds: 700),
+      ),
+    );
+    await Future.delayed(const Duration(milliseconds: 300));
+    await loadStoredTransactions();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Restart complete: ${transactions.length} transactions restored.'),
+          backgroundColor: Colors.green[800],
+          duration: const Duration(seconds: 2),
+        ),
       );
     }
   }
@@ -513,6 +552,12 @@ class _WalletScreenState extends State<WalletScreen> {
           ],
         ),
         actions: [
+          // Simulate App Restart (Loads from Storage for after.png verification)
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Simulate App Restart (Loads from Storage)',
+            onPressed: restartApp,
+          ),
           // Offline Simulation Toggle (Helps take the no-internet screenshot easily in DartPad)
           IconButton(
             icon: Icon(simulateOffline ? Icons.wifi_off : Icons.wifi),
@@ -529,11 +574,23 @@ class _WalletScreenState extends State<WalletScreen> {
             icon: const Icon(Icons.more_vert),
             tooltip: 'Options',
             onSelected: (val) {
-              if (val == 'reset') {
+              if (val == 'restart') {
+                restartApp();
+              } else if (val == 'reset') {
                 resetToDefaultData();
               }
             },
             itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'restart',
+                child: Row(
+                  children: [
+                    Icon(Icons.refresh, size: 18),
+                    SizedBox(width: 8),
+                    Text('Simulate Restart'),
+                  ],
+                ),
+              ),
               PopupMenuItem(
                 value: 'reset',
                 child: Row(
