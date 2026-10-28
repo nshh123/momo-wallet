@@ -1,13 +1,35 @@
 # MoMo Wallet
 
-A mobile money wallet simulation app inspired by MTN Mobile Money in Rwanda, built with Flutter.
+A mobile money wallet simulation app inspired by MTN Mobile Money in Rwanda. My data is now saved on the phone with `shared_preferences`, so nothing is lost when the app closes, and it shows live Kigali weather conditions and temperatures from the Open-Meteo REST API.
 
-## Project Choice: Option 1 — MoMo Wallet
-Built upon logic from **Labs 2, 3, 6**, and **Session 5 (Persistence & Live API)** of the Mobile Programming course.
+## Screenshots
+![Before closing](screenshots/before.png)
+![After running again](screenshots/after.png)
+![Live data from an API](screenshots/api.png)
+![No internet](screenshots/no-internet.png)
 
 ---
 
-## Features
+## Session 4 Feature Screenshots (Initial)
+
+### 1. Wallet Dashboard & Balance Card
+![Wallet Dashboard](screenshots/wallet.png)
+
+### 2. Send Money Screen (MTN Validation)
+![Send Money](screenshots/send.png)
+
+### 3. Agent Cash Out & Note Breakdown
+![Cash Out Notes](screenshots/cashout.png)
+
+### 4. Transaction Deletion & Undo Action
+![Undo Action](screenshots/undo.png)
+
+---
+
+## Project Overview
+Built upon logic from **Labs 2, 3, 6**, and **Session 5 (Persistence & Live API)** of the Mobile Programming course.
+
+### Key Features
 1. **Wallet Dashboard**:
    - Available balance card with quick actions: **Send**, **Cash Out**, and **Receive**.
    - Real-time statistics: **Total IN** (green), **Total OUT** (red), and **Lowest Balance Ever Reached**.
@@ -36,27 +58,12 @@ Built upon logic from **Labs 2, 3, 6**, and **Session 5 (Persistence & Live API)
    - Changes (sends, cash-outs, incoming receipts, deletions, and undos) survive app restarts.
    - Robust storage wrapper (`StorageService`) with timeout protection and in-memory fallback for web sandbox environments.
 8. **Live API Integration (Session 5 Part 2)**:
-   - Displays real-time Kigali weather in the header via the Open-Meteo REST API.
+   - Displays real-time Kigali weather in a prominent status card and header badge via the Open-Meteo REST API.
    - Handles the three essential asynchronous UI states:
-     - **Loading**: Compact progress spinner.
-     - **Error**: Offline status pill with one-tap retry button.
-     - **Data**: Real-time sky condition icon and temperature (e.g., *Kigali 22°C*).
-
----
-
-## Screenshots
-
-### 1. Wallet Dashboard & Balance Card
-![Wallet Dashboard](screenshots/wallet.png)
-
-### 2. Send Money Screen (MTN Validation)
-![Send Money](screenshots/send.png)
-
-### 3. Agent Cash Out & Note Breakdown
-![Cash Out Notes](screenshots/cashout.png)
-
-### 4. Transaction Deletion & Undo Action
-![Undo Action](screenshots/undo.png)
+     - **Loading**: Compact progress spinner and status text.
+     - **Error**: Clear error message (*"Could not load weather. Check your internet connection."*) and a prominent **Retry** button.
+     - **Data**: Real-time sky condition icon, temperature (e.g., *Kigali 24°C*), weather summary, and humidity.
+   - Built-in offline simulation toggle in the AppBar for rapid testing and screenshot capturing.
 
 ---
 
