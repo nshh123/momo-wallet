@@ -186,6 +186,7 @@ class _WalletScreenState extends State<WalletScreen> {
   LiveWeather? liveWeather;
   bool weatherLoading = true;
   String? weatherError;
+  bool simulateOffline = false;
 
   @override
   void initState() {
@@ -208,38 +209,7 @@ class _WalletScreenState extends State<WalletScreen> {
         final list = jsonDecode(savedTxJson) as List;
         transactions = list.map((x) => Transaction.fromJson(x as Map<String, dynamic>)).toList();
       } else {
-        // Initial sample data if running for the first time
-        transactions = [
-          Transaction(
-            id: 'tx_1',
-            title: 'Initial Deposit',
-            amount: 10000,
-            isIncoming: true,
-            date: DateTime.now().subtract(const Duration(days: 2)),
-          ),
-          Transaction(
-            id: 'tx_2',
-            title: 'Airtime purchase',
-            amount: 1000,
-            isIncoming: false,
-            date: DateTime.now().subtract(const Duration(days: 1, hours: 4)),
-          ),
-          Transaction(
-            id: 'tx_3',
-            title: 'Received from Eric',
-            amount: 5000,
-            isIncoming: true,
-            date: DateTime.now().subtract(const Duration(hours: 5)),
-          ),
-          Transaction(
-            id: 'tx_4',
-            title: 'Electricity token',
-            amount: 4000,
-            isIncoming: false,
-            date: DateTime.now().subtract(const Duration(hours: 1)),
-          ),
-        ];
-        await saveStoredTransactions();
+        await resetToDefaultData(silent: true);
       }
 
       if (savedDelJson != null) {
@@ -259,6 +229,48 @@ class _WalletScreenState extends State<WalletScreen> {
     await StorageService.setString('momo_deleted_transactions', jsonEncode(delList));
   }
 
+  Future<void> resetToDefaultData({bool silent = false}) async {
+    transactions = [
+      Transaction(
+        id: 'tx_1',
+        title: 'Initial Deposit',
+        amount: 10000,
+        isIncoming: true,
+        date: DateTime.now().subtract(const Duration(days: 2)),
+      ),
+      Transaction(
+        id: 'tx_2',
+        title: 'Airtime purchase',
+        amount: 1000,
+        isIncoming: false,
+        date: DateTime.now().subtract(const Duration(days: 1, hours: 4)),
+      ),
+      Transaction(
+        id: 'tx_3',
+        title: 'Received from Eric',
+        amount: 5000,
+        isIncoming: true,
+        date: DateTime.now().subtract(const Duration(hours: 5)),
+      ),
+      Transaction(
+        id: 'tx_4',
+        title: 'Electricity token',
+        amount: 4000,
+        isIncoming: false,
+        date: DateTime.now().subtract(const Duration(hours: 1)),
+      ),
+    ];
+    deletedTransactions = [];
+    await saveStoredTransactions();
+
+    if (!silent && mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Demo transactions reset to default')),
+      );
+    }
+  }
+
   // --- Live Weather API Call ---
   Future<void> loadWeather() async {
     setState(() {
@@ -267,6 +279,11 @@ class _WalletScreenState extends State<WalletScreen> {
     });
 
     try {
+      if (simulateOffline) {
+        await Future.delayed(const Duration(milliseconds: 350));
+        throw Exception('No internet connection (simulated)');
+      }
+
       final w = await fetchKigaliWeather();
       if (!mounted) return;
       setState(() {
@@ -278,7 +295,7 @@ class _WalletScreenState extends State<WalletScreen> {
       if (!mounted) return;
       setState(() {
         weatherLoading = false;
-        weatherError = 'Offline';
+        weatherError = 'Could not load weather. Check your internet connection.';
       });
     }
   }
@@ -483,59 +500,38 @@ class _WalletScreenState extends State<WalletScreen> {
           ],
         ),
         actions: [
-          // Live API Weather Header Widget (3 States: Loading, Error with Retry, Data)
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Center(
-              child: weatherLoading
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black54),
-                    )
-                  : weatherError != null
-                      ? InkWell(
-                          onTap: loadWeather,
-                          borderRadius: BorderRadius.circular(12),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: const Color(0x1F000000),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.wifi_off, size: 14, color: Colors.black87),
-                                SizedBox(width: 4),
-                                Text('Offline', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                              ],
-                            ),
-                          ),
-                        )
-                      : Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0x1A000000),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(iconForWeather(liveWeather!.code), size: 16, color: Colors.black87),
-                              const SizedBox(width: 5),
-                              Text(
-                                'Kigali ${liveWeather!.temperature.round()}°C',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.black,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-            ),
+          // Offline Simulation Toggle (Helps take the no-internet screenshot easily in DartPad)
+          IconButton(
+            icon: Icon(simulateOffline ? Icons.wifi_off : Icons.wifi),
+            tooltip: simulateOffline ? 'Switch Online' : 'Simulate Offline Mode (For Screenshot)',
+            onPressed: () {
+              setState(() {
+                simulateOffline = !simulateOffline;
+              });
+              loadWeather();
+            },
+          ),
+          // Options Menu
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'Options',
+            onSelected: (val) {
+              if (val == 'reset') {
+                resetToDefaultData();
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'reset',
+                child: Row(
+                  children: [
+                    Icon(Icons.restart_alt, size: 18),
+                    SizedBox(width: 8),
+                    Text('Reset Demo Data'),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -665,7 +661,18 @@ class _WalletScreenState extends State<WalletScreen> {
             ),
           ),
 
-          const SizedBox(height: 12),
+          // Live API Weather Widget (Session 5: Loading, Error with Retry, Data)
+          Padding(
+            padding: const EdgeInsets.only(top: 10, bottom: 4),
+            child: _WeatherCard(
+              weather: liveWeather,
+              loading: weatherLoading,
+              error: weatherError,
+              onRetry: loadWeather,
+            ),
+          ),
+
+          const SizedBox(height: 6),
 
           // Filter Chips (Scrollable row with DELETED chip)
           Padding(
@@ -1239,6 +1246,159 @@ class _StatCard extends StatelessWidget {
               value,
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: color),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WeatherCard extends StatelessWidget {
+  const _WeatherCard({
+    required this.weather,
+    required this.loading,
+    required this.error,
+    required this.onRetry,
+  });
+
+  final LiveWeather? weather;
+  final bool loading;
+  final String? error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) {
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF9C4), // soft amber
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFFFE082)),
+        ),
+        child: const Row(
+          children: [
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFE5A800)),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Fetching live Kigali weather from Open-Meteo...',
+                style: TextStyle(fontSize: 12, color: Colors.black87, fontWeight: FontWeight.w500),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (error != null) {
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFEBEE), // soft red
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFFFCDD2)),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.wifi_off, color: Colors.red[700], size: 26),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'No Internet Connection',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.red[900],
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    error!,
+                    style: TextStyle(fontSize: 11, color: Colors.red[800]),
+                  ),
+                ],
+              ),
+            ),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.red[700],
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                visualDensity: VisualDensity.compact,
+              ),
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('Retry', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (weather == null) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8E1),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFFFE082)),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            backgroundColor: const Color(0xFFFFCC00),
+            radius: 18,
+            child: Icon(iconForWeather(weather!.code), color: Colors.black87, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      'Kigali ${weather!.temperature.round()}°C',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE5A800),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        describeWeather(weather!.code),
+                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Humidity ${weather!.humidity}% • Live Open-Meteo API',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[800]),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh, size: 18, color: Colors.black54),
+            tooltip: 'Refresh Weather',
+            onPressed: onRetry,
           ),
         ],
       ),
