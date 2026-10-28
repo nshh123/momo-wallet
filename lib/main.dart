@@ -136,10 +136,17 @@ Future<LiveWeather> fetchKigaliWeather() async {
 }
 
 // ==========================================
-// 4. ROOT APP
+// 4. ROOT APP (With Phone Frame Simulation)
 // ==========================================
-class MoMoApp extends StatelessWidget {
+class MoMoApp extends StatefulWidget {
   const MoMoApp({super.key});
+
+  @override
+  State<MoMoApp> createState() => _MoMoAppState();
+}
+
+class _MoMoAppState extends State<MoMoApp> {
+  bool enablePhoneFrame = true;
 
   @override
   Widget build(BuildContext context) {
@@ -159,6 +166,12 @@ class MoMoApp extends StatelessWidget {
           elevation: 0,
         ),
       ),
+      builder: (context, child) {
+        if (!enablePhoneFrame) return child!;
+        return _PhoneDeviceFrame(
+          child: child!,
+        );
+      },
       home: const WalletScreen(),
     );
   }
@@ -1401,6 +1414,120 @@ class _WeatherCard extends StatelessWidget {
             onPressed: onRetry,
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 9. DARTPAD PHONE DEVICE FRAME SIMULATOR
+// ==========================================
+class _PhoneDeviceFrame extends StatelessWidget {
+  const _PhoneDeviceFrame({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xFF1E1E28), // Soft studio backdrop
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 12),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Container(
+          width: 390,
+          height: 820,
+          decoration: BoxDecoration(
+            color: Colors.black,
+            borderRadius: BorderRadius.circular(48),
+            border: Border.all(color: const Color(0xFF2C2F38), width: 9),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x66000000),
+                blurRadius: 35,
+                spreadRadius: 2,
+                offset: Offset(0, 15),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(39),
+            child: Stack(
+              children: [
+                // Inner Screen with mobile status bar insets
+                MediaQuery(
+                  data: MediaQuery.of(context).copyWith(
+                    padding: const EdgeInsets.only(top: 36, bottom: 20),
+                  ),
+                  child: child,
+                ),
+
+                // Simulated Top Status Bar
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: IgnorePointer(
+                    child: Container(
+                      height: 38,
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            '09:41',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.black,
+                            ),
+                          ),
+                          Container(
+                            width: 85,
+                            height: 20,
+                            decoration: BoxDecoration(
+                              color: Colors.black,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          const Row(
+                            children: [
+                              Icon(Icons.signal_cellular_4_bar, size: 14, color: Colors.black),
+                              SizedBox(width: 4),
+                              Icon(Icons.wifi, size: 14, color: Colors.black),
+                              SizedBox(width: 4),
+                              Icon(Icons.battery_full, size: 16, color: Colors.black),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+                // Simulated Bottom Home Indicator
+                Positioned(
+                  bottom: 6,
+                  left: 0,
+                  right: 0,
+                  child: IgnorePointer(
+                    child: Center(
+                      child: Container(
+                        width: 120,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.black45,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
