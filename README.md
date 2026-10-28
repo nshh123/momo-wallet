@@ -2,11 +2,14 @@
 
 A mobile money wallet simulation app inspired by MTN Mobile Money in Rwanda. My data is now saved on the phone with `shared_preferences`, so nothing is lost when the app closes, and it shows live Kigali weather conditions and temperatures from the Open-Meteo REST API.
 
+---
+
 ## Screenshots
-![Before closing](screenshots/before.png)
-![After running again](screenshots/after.png)
-![Live data from an API](screenshots/api.png)
-![No internet](screenshots/no-internet.png)
+
+| 1. Before Closing | 2. After Running Again | 3. Live Data from API | 4. No Internet / Retry |
+| :---: | :---: | :---: | :---: |
+| ![Before closing](screenshots/before.png) | ![After running again](screenshots/after.png) | ![Live data from an API](screenshots/api.png) | ![No internet](screenshots/no-internet.png) |
+| *App with new transactions added* | *State reloaded intact from `shared_preferences`* | *Live Kigali weather fetched from Open-Meteo* | *Network error state with Retry button* |
 
 ---
 
@@ -42,7 +45,7 @@ Built upon logic from **Labs 2, 3, 6**, and **Session 5 (Persistence & Live API)
    - Changes (sends, cash-outs, incoming receipts, deletions, and undos) survive app restarts.
    - Robust storage wrapper (`StorageService`) with pre-initialization, timeout protection, and in-memory fallback for web sandbox environments.
 8. **Live API Integration (Session 5 Part 2)**:
-   - Displays real-time Kigali weather in a prominent status card and header badge via the Open-Meteo REST API.
+   - Displays real-time Kigali weather in a prominent status card via the Open-Meteo REST API.
    - Handles the three essential asynchronous UI states:
      - **Loading**: Compact progress spinner and status text.
      - **Error**: Clear error message (*"Could not load weather. Check your internet connection."*) and a prominent **Retry** button.
