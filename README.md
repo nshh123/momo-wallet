@@ -10,22 +10,6 @@ A mobile money wallet simulation app inspired by MTN Mobile Money in Rwanda. My 
 
 ---
 
-## Session 4 Feature Screenshots (Initial)
-
-### 1. Wallet Dashboard & Balance Card
-![Wallet Dashboard](screenshots/wallet.png)
-
-### 2. Send Money Screen (MTN Validation)
-![Send Money](screenshots/send.png)
-
-### 3. Agent Cash Out & Note Breakdown
-![Cash Out Notes](screenshots/cashout.png)
-
-### 4. Transaction Deletion & Undo Action
-![Undo Action](screenshots/undo.png)
-
----
-
 ## Project Overview
 Built upon logic from **Labs 2, 3, 6**, and **Session 5 (Persistence & Live API)** of the Mobile Programming course.
 
@@ -56,7 +40,7 @@ Built upon logic from **Labs 2, 3, 6**, and **Session 5 (Persistence & Live API)
 7. **Local Data Persistence (Session 5 Part 2)**:
    - Persists all active transactions and deleted items using `SharedPreferences` with `toJson()` and `fromJson()` serialization.
    - Changes (sends, cash-outs, incoming receipts, deletions, and undos) survive app restarts.
-   - Robust storage wrapper (`StorageService`) with timeout protection and in-memory fallback for web sandbox environments.
+   - Robust storage wrapper (`StorageService`) with pre-initialization, timeout protection, and in-memory fallback for web sandbox environments.
 8. **Live API Integration (Session 5 Part 2)**:
    - Displays real-time Kigali weather in a prominent status card and header badge via the Open-Meteo REST API.
    - Handles the three essential asynchronous UI states:
