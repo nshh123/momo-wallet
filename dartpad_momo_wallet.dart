@@ -49,29 +49,9 @@ class MockFirestoreException implements Exception {
 
 /// Simulated Firebase backend singleton
 class FirebaseBackend {
-  FirebaseBackend._();
-  static final FirebaseBackend instance = FirebaseBackend._();
-
-  // Registered Auth users: email -> password
-  final Map<String, String> _registeredUsers = {
-    'aline@gmail.com': 'password123',
-  };
-
-  // User database: uid -> email
-  final Map<String, String> _uidToEmail = {
-    'user_aline_1': 'aline@gmail.com',
-  };
-  final Map<String, String> _emailToUid = {
-    'aline@gmail.com': 'user_aline_1',
-  };
-
-  MockUser? _currentUser;
-  final StreamController<MockUser?> _authController =
-      StreamController<MockUser?>.broadcast();
-
-  // Firestore collections: 'users/{uid}/transactions' -> List of Map<String, dynamic>
-  final Map<String, List<Map<String, dynamic>>> _userTransactions = {
-    'user_aline_1': [
+  FirebaseBackend._() {
+    // Seed initial Aline account transactions
+    _userTransactions['user_aline_1'] = [
       {
         'id': 'tx_1',
         'description': 'Opening balance',
@@ -93,55 +73,90 @@ class FirebaseBackend {
         'isIn': true,
         'createdAt': DateTime.now().subtract(const Duration(hours: 1)),
       },
-    ],
+    ];
+  }
+  static final FirebaseBackend instance = FirebaseBackend._();
+
+  // Registered Auth users: email -> password
+  final Map<String, String> _registeredUsers = {
+    'aline@gmail.com': 'password123',
   };
 
+  // User database mapping
+  final Map<String, String> _uidToEmail = {
+    'user_aline_1': 'aline@gmail.com',
+  };
+  final Map<String, String> _emailToUid = {
+    'aline@gmail.com': 'user_aline_1',
+  };
+
+  MockUser? _currentUser;
+  final StreamController<MockUser?> _authController =
+      StreamController<MockUser?>.broadcast();
+
+  // Firestore collections: 'users/{uid}/transactions'
+  final Map<String, List<Map<String, dynamic>>> _userTransactions = {};
   final Map<String, StreamController<MockQuerySnapshot>> _streamControllers = {};
 
   // Rule break simulation (triggers [cloud_firestore/permission-denied])
   bool rulesViolated = false;
 
   MockUser? get currentUser => _currentUser;
-  Stream<MockUser?> get authStateChanges => _authController.stream;
 
-  Stream<MockQuerySnapshot> streamTransactions(String uid) {
-    if (!_streamControllers.containsKey(uid)) {
-      _streamControllers[uid] = StreamController<MockQuerySnapshot>.broadcast();
-    }
-    // Emit initial snapshot
-    Timer.run(() => _emitSnapshot(uid));
-    return _streamControllers[uid]!.stream;
+  // Emits current auth state immediately, then listens for future auth changes
+  Stream<MockUser?> get authStateChanges async* {
+    yield _currentUser;
+    yield* _authController.stream;
   }
 
-  void _emitSnapshot(String uid) {
-    if (!_streamControllers.containsKey(uid)) return;
+  MockQuerySnapshot _buildSnapshot(String uid) {
     if (rulesViolated) {
-      _streamControllers[uid]!.addError(
-        MockFirestoreException(
-          '[cloud_firestore/permission-denied] The caller does not have permission to execute the specified operation.',
-        ),
+      throw MockFirestoreException(
+        '[cloud_firestore/permission-denied] The caller does not have permission to execute the specified operation.',
       );
-      return;
     }
     final rawList = _userTransactions[uid] ?? [];
     final sorted = List<Map<String, dynamic>>.from(rawList)
       ..sort((a, b) {
         final da = a['createdAt'] as DateTime? ?? DateTime.now();
         final db = b['createdAt'] as DateTime? ?? DateTime.now();
-        return db.compareTo(da); // descending
+        return db.compareTo(da); // descending order
       });
 
     final docs = sorted
         .map((m) => MockDocumentSnapshot(id: m['id'] as String, dataMap: m))
         .toList();
-    _streamControllers[uid]!.add(MockQuerySnapshot(docs));
+    return MockQuerySnapshot(docs);
+  }
+
+  Stream<MockQuerySnapshot> streamTransactions(String uid) async* {
+    if (!_streamControllers.containsKey(uid)) {
+      _streamControllers[uid] = StreamController<MockQuerySnapshot>.broadcast();
+    }
+    // Yield first snapshot immediately so stream never hangs in waiting state
+    try {
+      yield _buildSnapshot(uid);
+    } catch (e) {
+      yield* Stream.error(e);
+    }
+    yield* _streamControllers[uid]!.stream;
+  }
+
+  void _emitSnapshot(String uid) {
+    if (!_streamControllers.containsKey(uid)) return;
+    try {
+      final snap = _buildSnapshot(uid);
+      _streamControllers[uid]!.add(snap);
+    } catch (e) {
+      _streamControllers[uid]!.addError(e);
+    }
   }
 
   Future<void> createUser({
     required String email,
     required String password,
   }) async {
-    await Future.delayed(const Duration(milliseconds: 350));
+    await Future.delayed(const Duration(milliseconds: 250));
     final cleanEmail = email.trim().toLowerCase();
     if (_registeredUsers.containsKey(cleanEmail)) {
       throw MockFirebaseAuthException('email-already-in-use');
@@ -158,7 +173,7 @@ class FirebaseBackend {
     _currentUser = MockUser(uid: newUid, email: cleanEmail);
     _authController.add(_currentUser);
 
-    // Seed sample transactions for new account
+    // Seed sample data for the newly created account
     await seedSampleData(newUid);
   }
 
@@ -166,7 +181,7 @@ class FirebaseBackend {
     required String email,
     required String password,
   }) async {
-    await Future.delayed(const Duration(milliseconds: 350));
+    await Future.delayed(const Duration(milliseconds: 250));
     final cleanEmail = email.trim().toLowerCase();
     if (!_registeredUsers.containsKey(cleanEmail)) {
       throw MockFirebaseAuthException('user-not-found');
@@ -181,7 +196,7 @@ class FirebaseBackend {
   }
 
   Future<void> signOut() async {
-    await Future.delayed(const Duration(milliseconds: 150));
+    await Future.delayed(const Duration(milliseconds: 100));
     _currentUser = null;
     _authController.add(null);
   }
@@ -220,7 +235,7 @@ class FirebaseBackend {
         '[cloud_firestore/permission-denied] Missing or insufficient permissions.',
       );
     }
-    await Future.delayed(const Duration(milliseconds: 150));
+    await Future.delayed(const Duration(milliseconds: 100));
     final id = 'tx_${DateTime.now().millisecondsSinceEpoch}';
     final docData = {
       ...data,
@@ -239,7 +254,7 @@ class FirebaseBackend {
         '[cloud_firestore/permission-denied] Missing or insufficient permissions.',
       );
     }
-    await Future.delayed(const Duration(milliseconds: 150));
+    await Future.delayed(const Duration(milliseconds: 100));
     final list = _userTransactions[uid] ?? [];
     final idx = list.indexWhere((m) => m['id'] == docId);
     if (idx != -1) {
@@ -257,7 +272,7 @@ class FirebaseBackend {
         '[cloud_firestore/permission-denied] Missing or insufficient permissions.',
       );
     }
-    await Future.delayed(const Duration(milliseconds: 150));
+    await Future.delayed(const Duration(milliseconds: 100));
     final list = _userTransactions[uid] ?? [];
     list.removeWhere((m) => m['id'] == docId);
     _emitSnapshot(uid);
@@ -265,7 +280,7 @@ class FirebaseBackend {
 
   Future<void> restoreTransaction(
       String uid, String docId, Map<String, dynamic> data) async {
-    await Future.delayed(const Duration(milliseconds: 150));
+    await Future.delayed(const Duration(milliseconds: 100));
     final list = _userTransactions.putIfAbsent(uid, () => []);
     list.add({
       ...data,
@@ -358,15 +373,16 @@ class AuthGate extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<MockUser?>(
       stream: FirebaseBackend.instance.authStateChanges,
-      initialData: FirebaseBackend.instance.currentUser,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting &&
-            snapshot.data == null) {
+            !snapshot.hasData &&
+            FirebaseBackend.instance.currentUser == null) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
-        if (snapshot.data == null) {
+        final user = snapshot.data ?? FirebaseBackend.instance.currentUser;
+        if (user == null) {
           return const LoginScreen();
         }
         return const WalletScreen();
@@ -566,9 +582,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: Center(child: CircularProgressIndicator()),
                     ),
                   const SizedBox(height: 24),
-                  // Quick tester accounts for screenshot taking
                   Wrap(
                     spacing: 8,
+                    runSpacing: 8,
                     alignment: WrapAlignment.center,
                     children: [
                       ActionChip(
@@ -766,8 +782,8 @@ class _WalletScreenState extends State<WalletScreen> {
                   : Colors.black,
             ),
             tooltip: FirebaseBackend.instance.rulesViolated
-                ? 'Security Rules Active: Permission Denied (Tap to Restore)'
-                : 'Simulate Firestore Rule Violation (For Screenshot)',
+                ? 'Rules Violated: Access Denied (Tap to restore)'
+                : 'Simulate Security Rule Violation (For Screenshot)',
             onPressed: () {
               setState(() {
                 FirebaseBackend.instance.toggleRuleViolation();
@@ -1683,113 +1699,104 @@ class _PhoneDeviceFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // If screen is smaller than mobile dimensions, render without extra frame
-        if (constraints.maxWidth < 460 || constraints.maxHeight < 700) {
-          return child;
-        }
-
-        return Container(
-          color: const Color(0xFF1E1E24), // Background canvas
-          alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-          child: FittedBox(
-            fit: BoxFit.contain,
-            child: Container(
-              width: 390,
-              height: 844, // iPhone 14 style aspect ratio
-              decoration: BoxDecoration(
-                color: Colors.black,
-                borderRadius: BorderRadius.circular(50),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Colors.black54,
-                    blurRadius: 30,
-                    offset: Offset(0, 15),
-                  ),
-                ],
-                border: Border.all(color: const Color(0xFF333338), width: 10),
+    return Container(
+      color: const Color(0xFF1E1E24), // Background canvas
+      alignment: Alignment.center,
+      padding: const EdgeInsets.all(12),
+      child: FittedBox(
+        fit: BoxFit.contain,
+        child: Container(
+          width: 390,
+          height: 844, // iPhone aspect ratio
+          decoration: BoxDecoration(
+            color: Colors.black,
+            borderRadius: BorderRadius.circular(48),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black54,
+                blurRadius: 28,
+                offset: Offset(0, 14),
               ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(40),
-                child: Stack(
-                  children: [
-                    // Inner Screen Content
-                    Positioned.fill(
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 36, bottom: 20),
-                        child: child,
-                      ),
-                    ),
+            ],
+            border: Border.all(color: const Color(0xFF333338), width: 9),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(40),
+            child: Stack(
+              children: [
+                // Inner Screen Content
+                Positioned.fill(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 36, bottom: 20),
+                    child: child,
+                  ),
+                ),
 
-                    // Top Status Bar & Dynamic Island
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      height: 38,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                        color: Colors.transparent,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              '9:41',
-                              style: TextStyle(
-                                color: Colors.black,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                              ),
-                            ),
-                            Container(
-                              width: 110,
-                              height: 22,
-                              decoration: BoxDecoration(
-                                color: Colors.black,
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                            const Row(
-                              children: [
-                                Icon(Icons.signal_cellular_alt,
-                                    size: 14, color: Colors.black),
-                                SizedBox(width: 4),
-                                Icon(Icons.wifi, size: 14, color: Colors.black),
-                                SizedBox(width: 4),
-                                Icon(Icons.battery_full,
-                                    size: 16, color: Colors.black),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    // Bottom Home Indicator Bar
-                    Positioned(
-                      bottom: 6,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: Container(
-                          width: 134,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: Colors.black38,
-                            borderRadius: BorderRadius.circular(2),
+                // Top Status Bar & Dynamic Island
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 38,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    color: Colors.transparent,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          '9:41',
+                          style: TextStyle(
+                            color: Colors.black,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
                           ),
                         ),
+                        Container(
+                          width: 110,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            color: Colors.black,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        const Row(
+                          children: [
+                            Icon(Icons.signal_cellular_alt,
+                                size: 14, color: Colors.black),
+                            SizedBox(width: 4),
+                            Icon(Icons.wifi, size: 14, color: Colors.black),
+                            SizedBox(width: 4),
+                            Icon(Icons.battery_full,
+                                size: 16, color: Colors.black),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Bottom Home Indicator Bar
+                Positioned(
+                  bottom: 6,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: Container(
+                      width: 134,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.black38,
+                        borderRadius: BorderRadius.circular(2),
                       ),
                     ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }
