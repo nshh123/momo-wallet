@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "102938475612",
+    "project_id": "momo-wallet",
+    "storage_bucket": "momo-wallet.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:102938475612:android:abcdef0123456789",
+        "android_client_info": {
+          "package_name": "com.example.momo_wallet"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyFakeKeyForMoMoWalletProjectOnly"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
