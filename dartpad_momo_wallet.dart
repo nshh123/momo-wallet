@@ -50,39 +50,37 @@ class MockFirestoreException implements Exception {
 /// Simulated Firebase backend singleton
 class FirebaseBackend {
   FirebaseBackend._() {
-    // Seed initial Aline account transactions
+    // Seed initial Aline account transactions matching Session 6 tutorial
     _userTransactions['user_aline_1'] = [
       {
         'id': 'tx_1',
-        'description': 'Opening balance',
-        'amount': 10000,
+        'title': 'Received from Keza',
+        'amount': 4000,
         'isIn': true,
-        'createdAt': DateTime.now().subtract(const Duration(hours: 3)),
+        'createdAt': DateTime.now().subtract(const Duration(hours: 1)),
       },
       {
         'id': 'tx_2',
-        'description': 'Sent to 0788123456',
+        'title': 'Sent to 0788123456',
         'amount': 2500,
         'isIn': false,
         'createdAt': DateTime.now().subtract(const Duration(hours: 2)),
       },
       {
         'id': 'tx_3',
-        'description': 'Received from Keza',
-        'amount': 4000,
+        'title': 'Opening balance',
+        'amount': 10000,
         'isIn': true,
-        'createdAt': DateTime.now().subtract(const Duration(hours: 1)),
+        'createdAt': DateTime.now().subtract(const Duration(hours: 3)),
       },
     ];
   }
   static final FirebaseBackend instance = FirebaseBackend._();
 
-  // Registered Auth users: email -> password
   final Map<String, String> _registeredUsers = {
     'aline@gmail.com': 'password123',
   };
 
-  // User database mapping
   final Map<String, String> _uidToEmail = {
     'user_aline_1': 'aline@gmail.com',
   };
@@ -94,16 +92,13 @@ class FirebaseBackend {
   final StreamController<MockUser?> _authController =
       StreamController<MockUser?>.broadcast();
 
-  // Firestore collections: 'users/{uid}/transactions'
   final Map<String, List<Map<String, dynamic>>> _userTransactions = {};
   final Map<String, StreamController<MockQuerySnapshot>> _streamControllers = {};
 
-  // Rule break simulation (triggers [cloud_firestore/permission-denied])
   bool rulesViolated = false;
 
   MockUser? get currentUser => _currentUser;
 
-  // Emits current auth state immediately, then listens for future auth changes
   Stream<MockUser?> get authStateChanges async* {
     yield _currentUser;
     yield* _authController.stream;
@@ -120,7 +115,7 @@ class FirebaseBackend {
       ..sort((a, b) {
         final da = a['createdAt'] as DateTime? ?? DateTime.now();
         final db = b['createdAt'] as DateTime? ?? DateTime.now();
-        return db.compareTo(da); // descending order
+        return db.compareTo(da); // Newest first
       });
 
     final docs = sorted
@@ -133,7 +128,6 @@ class FirebaseBackend {
     if (!_streamControllers.containsKey(uid)) {
       _streamControllers[uid] = StreamController<MockQuerySnapshot>.broadcast();
     }
-    // Yield first snapshot immediately so stream never hangs in waiting state
     try {
       yield _buildSnapshot(uid);
     } catch (e) {
@@ -173,7 +167,6 @@ class FirebaseBackend {
     _currentUser = MockUser(uid: newUid, email: cleanEmail);
     _authController.add(_currentUser);
 
-    // Seed sample data for the newly created account
     await seedSampleData(newUid);
   }
 
@@ -205,24 +198,24 @@ class FirebaseBackend {
     final samples = [
       {
         'id': 'tx_${DateTime.now().millisecondsSinceEpoch}_1',
-        'description': 'Opening balance',
-        'amount': 10000,
+        'title': 'Received from Keza',
+        'amount': 4000,
         'isIn': true,
-        'createdAt': DateTime.now().subtract(const Duration(minutes: 5)),
+        'createdAt': DateTime.now().subtract(const Duration(minutes: 1)),
       },
       {
         'id': 'tx_${DateTime.now().millisecondsSinceEpoch}_2',
-        'description': 'Sent to 0788123456',
+        'title': 'Sent to 0788123456',
         'amount': 2500,
         'isIn': false,
         'createdAt': DateTime.now().subtract(const Duration(minutes: 3)),
       },
       {
         'id': 'tx_${DateTime.now().millisecondsSinceEpoch}_3',
-        'description': 'Received from Keza',
-        'amount': 4000,
+        'title': 'Opening balance',
+        'amount': 10000,
         'isIn': true,
-        'createdAt': DateTime.now().subtract(const Duration(minutes: 1)),
+        'createdAt': DateTime.now().subtract(const Duration(minutes: 5)),
       },
     ];
     _userTransactions[uid] = samples;
@@ -299,41 +292,46 @@ class FirebaseBackend {
 }
 
 // Model
-class Txn {
-  Txn({
-    this.id = '',
-    required this.description,
+class TransactionItem {
+  TransactionItem({
+    required this.id,
+    required this.title,
     required this.amount,
     required this.isIn,
-    this.createdAt,
+    required this.createdAt,
   });
 
   final String id;
-  final String description;
+  final String title;
   final int amount;
   final bool isIn;
-  final DateTime? createdAt;
+  final DateTime createdAt;
 
   Map<String, dynamic> toMap() => {
-        'description': description,
+        'title': title,
         'amount': amount,
         'isIn': isIn,
       };
 
-  factory Txn.fromDoc(MockDocumentSnapshot doc) {
+  factory TransactionItem.fromDoc(MockDocumentSnapshot doc) {
     final data = doc.data();
-    return Txn(
+    return TransactionItem(
       id: doc.id,
-      description: data['description'] as String,
+      title: (data['title'] ?? data['description'] ?? 'Transaction') as String,
       amount: (data['amount'] as num).toInt(),
       isIn: data['isIn'] as bool,
-      createdAt: data['createdAt'] as DateTime?,
+      createdAt: (data['createdAt'] as DateTime?) ?? DateTime.now(),
     );
   }
 }
 
+String formatRwf(int amount) {
+  return amount.toString().replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},');
+}
+
 // ============================================================================
-// 2. ROOT APPLICATION WITH AUTH GATE & PHONE DEVICE FRAME
+// 2. ROOT APP (With the Exact Session 4/5 Phone Simulator Frame)
 // ============================================================================
 
 class MoMoApp extends StatelessWidget {
@@ -347,9 +345,9 @@ class MoMoApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFFFCC00),
+          seedColor: const Color(0xFFFFCC00), // MTN MoMo Yellow
           primary: const Color(0xFFE5A800),
-          surface: Colors.grey.shade50,
+          surface: Colors.grey[50],
         ),
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFFFFCC00),
@@ -365,7 +363,10 @@ class MoMoApp extends StatelessWidget {
   }
 }
 
-// AuthGate (Step 2 of Lab)
+// ============================================================================
+// 3. AUTH GATE (Session 6 Step 2)
+// ============================================================================
+
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
 
@@ -392,7 +393,7 @@ class AuthGate extends StatelessWidget {
 }
 
 // ============================================================================
-// 3. LOGIN & REGISTRATION SCREEN (Step 1 of Lab)
+// 4. LOGIN SCREEN (Session 6 Step 1)
 // ============================================================================
 
 class LoginScreen extends StatefulWidget {
@@ -472,6 +473,19 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.grey[50],
+      appBar: AppBar(
+        title: const Row(
+          children: [
+            Icon(Icons.account_balance_wallet, color: Colors.black),
+            SizedBox(width: 8),
+            Text(
+              'MoMo Wallet',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+      ),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -482,31 +496,50 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(
-                    Icons.account_balance_wallet,
-                    size: 64,
-                    color: Color(0xFFE5A800),
+                  Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFCC00),
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x33000000),
+                          blurRadius: 10,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(
+                      Icons.account_balance_wallet,
+                      size: 42,
+                      color: Colors.black,
+                    ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
                   const Text(
                     'MoMo Wallet',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   const Text(
                     'Cloud Database · Firebase Authentication',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey, fontSize: 13),
+                    style: TextStyle(color: Colors.black54, fontSize: 13),
                   ),
                   const SizedBox(height: 28),
                   TextFormField(
                     controller: _email,
                     keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Email',
-                      prefixIcon: Icon(Icons.email_outlined),
-                      border: OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.email_outlined),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      filled: true,
+                      fillColor: Colors.white,
                     ),
                     validator: (v) {
                       final email = (v ?? '').trim();
@@ -518,25 +551,29 @@ class _LoginScreenState extends State<LoginScreen> {
                       return null;
                     },
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
                   TextFormField(
                     controller: _password,
                     obscureText: true,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Password',
-                      prefixIcon: Icon(Icons.lock_outline),
-                      border: OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.lock_outline),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      filled: true,
+                      fillColor: Colors.white,
                     ),
                     validator: (v) =>
                         (v ?? '').length < 6 ? 'At least 6 characters' : null,
                   ),
                   if (_error != null) ...[
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: Colors.red.shade50,
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: Colors.red.shade200),
                       ),
                       child: Row(
@@ -555,17 +592,21 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                   ],
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 22),
                   FilledButton(
                     onPressed: _busy ? null : () => _submit(newAccount: false),
                     style: FilledButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      backgroundColor: const Color(0xFFE5A800),
+                      backgroundColor: const Color(0xFFFFCC00),
                       foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                     child: const Text(
                       'Log in',
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -573,6 +614,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     onPressed: _busy ? null : () => _submit(newAccount: true),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
+                      foregroundColor: Colors.black87,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                     child: const Text('Create account'),
                   ),
@@ -581,7 +626,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       padding: EdgeInsets.only(top: 16),
                       child: Center(child: CircularProgressIndicator()),
                     ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 20),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
@@ -621,7 +666,7 @@ class _LoginScreenState extends State<LoginScreen> {
 }
 
 // ============================================================================
-// 4. MAIN WALLET SCREEN (Step 2 Logout & Step 4 Live Streams)
+// 5. MAIN WALLET SCREEN (Exact Original Layout + Firebase Cloud Sync)
 // ============================================================================
 
 class WalletScreen extends StatefulWidget {
@@ -632,14 +677,15 @@ class WalletScreen extends StatefulWidget {
 }
 
 class _WalletScreenState extends State<WalletScreen> {
-  String _filter = 'All';
+  static const int startingCapital = 10000;
+  String filter = 'All'; // 'All', 'IN', 'OUT'
 
-  Future<void> _delete(BuildContext context, Txn txn) async {
+  Future<void> _delete(BuildContext context, TransactionItem txn) async {
     final sure = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete this transaction?'),
-        content: Text(txn.description),
+        content: Text(txn.title),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -662,7 +708,7 @@ class _WalletScreenState extends State<WalletScreen> {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Deleted "${txn.description}"'),
+              content: Text('Deleted "${txn.title}"'),
               action: SnackBarAction(
                 label: 'Undo',
                 onPressed: () async {
@@ -704,7 +750,7 @@ class _WalletScreenState extends State<WalletScreen> {
               controller: descController,
               decoration: const InputDecoration(
                 labelText: 'Sender / Description',
-                hintText: 'e.g. From Keza',
+                hintText: 'e.g. Keza',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -736,7 +782,7 @@ class _WalletScreenState extends State<WalletScreen> {
 
               Navigator.pop(ctx);
               await FirebaseBackend.instance.addTransaction(uid, {
-                'description': 'Received from $desc',
+                'title': 'Received from $desc',
                 'amount': amount,
                 'isIn': true,
                 'createdAt': DateTime.now(),
@@ -756,22 +802,29 @@ class _WalletScreenState extends State<WalletScreen> {
     final uid = user?.uid ?? '';
 
     return Scaffold(
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        title: Row(
           children: [
-            const Text(
-              'MoMo Wallet',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-            ),
-            Text(
-              userEmail,
-              style: const TextStyle(fontSize: 12, color: Colors.black87),
+            const Icon(Icons.account_balance_wallet, color: Colors.black),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'MoMo Wallet',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+                ),
+                Text(
+                  userEmail,
+                  style: const TextStyle(fontSize: 11, color: Colors.black87),
+                ),
+              ],
             ),
           ],
         ),
         actions: [
-          // Step 6 Security Rules Break Simulator Button (for permission-denied screenshot)
+          // Step 6 Rules Break Simulator Toggle (triggers permission-denied screenshot)
           IconButton(
             icon: Icon(
               FirebaseBackend.instance.rulesViolated
@@ -782,8 +835,8 @@ class _WalletScreenState extends State<WalletScreen> {
                   : Colors.black,
             ),
             tooltip: FirebaseBackend.instance.rulesViolated
-                ? 'Rules Violated: Access Denied (Tap to restore)'
-                : 'Simulate Security Rule Violation (For Screenshot)',
+                ? 'Rules Broken: Access Denied (Tap to restore)'
+                : 'Simulate Rule Violation [cloud_firestore/permission-denied]',
             onPressed: () {
               setState(() {
                 FirebaseBackend.instance.toggleRuleViolation();
@@ -847,10 +900,12 @@ class _WalletScreenState extends State<WalletScreen> {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final txns = snapshot.data!.docs.map(Txn.fromDoc).toList();
+          final txns = snapshot.data!.docs
+              .map(TransactionItem.fromDoc)
+              .toList();
 
-          // Computed, never saved
-          final balance = txns.fold<int>(
+          // Save facts. Compute the rest dynamically:
+          final currentBalance = txns.fold<int>(
             0,
             (total, t) => t.isIn ? total + t.amount : total - t.amount,
           );
@@ -863,285 +918,298 @@ class _WalletScreenState extends State<WalletScreen> {
                 (acc, t) => acc + t.amount,
               );
 
-          final filteredTxns = txns.where((t) {
-            if (_filter == 'IN') return t.isIn;
-            if (_filter == 'OUT') return !t.isIn;
+          int lowestBalance = startingCapital;
+          if (txns.isNotEmpty) {
+            final chronological = List<TransactionItem>.from(txns)
+              ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+            int running = 0;
+            lowestBalance = chronological.first.amount;
+            for (final tx in chronological) {
+              running += tx.isIn ? tx.amount : -tx.amount;
+              if (running < lowestBalance) lowestBalance = running;
+            }
+          }
+
+          final filteredList = txns.where((tx) {
+            if (filter == 'IN') return tx.isIn;
+            if (filter == 'OUT') return !tx.isIn;
             return true;
           }).toList();
 
-          return CustomScrollView(
-            slivers: [
-              // 1. Balance & Summary Card
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Card(
-                    elevation: 3,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
+          return ListView(
+            padding: const EdgeInsets.only(bottom: 80),
+            children: [
+              // 1. Available Balance Yellow Card with Action Buttons Inside (Original Design)
+              Container(
+                margin: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFCC00),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x26000000),
+                      blurRadius: 10,
+                      offset: Offset(0, 4),
                     ),
-                    color: const Color(0xFFFFCC00),
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Available Balance',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '${formatRwf(currentBalance)} RWF',
+                      style: const TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.black,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    // Action Buttons Row Inside Card
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        _ActionButton(
+                          icon: Icons.send,
+                          label: 'Send',
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    SendMoneyScreen(currentBalance: currentBalance),
+                              ),
+                            );
+                          },
+                        ),
+                        _ActionButton(
+                          icon: Icons.local_atm,
+                          label: 'Cash Out',
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    AgentCashOutScreen(currentBalance: currentBalance),
+                              ),
+                            );
+                          },
+                        ),
+                        _ActionButton(
+                          icon: Icons.call_received,
+                          label: 'Receive',
+                          onTap: () => _promptReceiveMoney(context),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // 2. Statistics Row: Total IN, Total OUT, Lowest (Original Design)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _StatCard(
+                        title: 'Total IN',
+                        value: '+${formatRwf(totalIn)} RWF',
+                        color: Colors.green[700]!,
+                        icon: Icons.arrow_downward,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _StatCard(
+                        title: 'Total OUT',
+                        value: '-${formatRwf(totalOut)} RWF',
+                        color: Colors.red[700]!,
+                        icon: Icons.arrow_upward,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _StatCard(
+                        title: 'Lowest',
+                        value: '${formatRwf(lowestBalance)} RWF',
+                        color: Colors.blue[800]!,
+                        icon: Icons.trending_down,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // 3. Cloud Synced Badge & Weather Card
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF8E1),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFFFE082)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.cloud_done, color: Color(0xFFE5A800), size: 26),
+                    const SizedBox(width: 10),
+                    const Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text(
-                                'Main Balance',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.black87,
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: const Text(
-                                  'Cloud Synced',
-                                  style: TextStyle(
-                                      fontSize: 11, fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
                           Text(
-                            '$balance RWF',
-                            style: const TextStyle(
-                              fontSize: 32,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black,
-                            ),
-                          ),
-                          const Divider(height: 24, color: Colors.black26),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Row(
-                                children: [
-                                  const Icon(Icons.arrow_downward,
-                                      color: Colors.green, size: 16),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    '+$totalIn RWF',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.black87,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              Row(
-                                children: [
-                                  const Icon(Icons.arrow_upward,
-                                      color: Colors.red, size: 16),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    '-$totalOut RWF',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.black87,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
-              // 2. Action Buttons (Send, Cash Out, Receive)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.send, size: 16),
-                          label: const Text('Send'),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                          ),
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    SendScreen(currentBalance: balance),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.point_of_sale, size: 16),
-                          label: const Text('Cash Out'),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                          ),
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    CashOutScreen(currentBalance: balance),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.download, size: 16),
-                          label: const Text('Receive'),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                          ),
-                          onPressed: () => _promptReceiveMoney(context),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // 3. Filter Chips
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: Row(
-                    children: [
-                      FilterChip(
-                        label: const Text('All'),
-                        selected: _filter == 'All',
-                        onSelected: (_) => setState(() => _filter = 'All'),
-                      ),
-                      const SizedBox(width: 8),
-                      FilterChip(
-                        label: const Text('Money In'),
-                        selected: _filter == 'IN',
-                        onSelected: (_) => setState(() => _filter = 'IN'),
-                      ),
-                      const SizedBox(width: 8),
-                      FilterChip(
-                        label: const Text('Money Out'),
-                        selected: _filter == 'OUT',
-                        onSelected: (_) => setState(() => _filter = 'OUT'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // 4. Live Transactions or Empty State
-              if (filteredTxns.isEmpty)
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.inbox_outlined,
-                              size: 48, color: Colors.grey.shade400),
-                          const SizedBox(height: 12),
-                          const Text(
-                            'No transactions found',
+                            'Kigali 27°C · Cloudy',
                             style: TextStyle(
-                              fontSize: 16,
+                              fontSize: 13,
                               fontWeight: FontWeight.bold,
-                              color: Colors.grey,
+                              color: Colors.black87,
                             ),
                           ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Tap + to record your first transaction.',
-                            style: TextStyle(fontSize: 13, color: Colors.grey),
+                          Text(
+                            'Cloud Firestore · Synced & Private',
+                            style: TextStyle(fontSize: 11, color: Colors.black54),
                           ),
                         ],
                       ),
                     ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE5A800),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Text(
+                        'Live',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // 4. Section Title & Filter Chips
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                child: Row(
+                  children: [
+                    const Text(
+                      'Transactions',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                    ),
+                    const Spacer(),
+                    Wrap(
+                      spacing: 6,
+                      children: [
+                        FilterChip(
+                          label: const Text('All'),
+                          selected: filter == 'All',
+                          onSelected: (_) => setState(() => filter = 'All'),
+                        ),
+                        FilterChip(
+                          label: const Text('IN'),
+                          selected: filter == 'IN',
+                          onSelected: (_) => setState(() => filter = 'IN'),
+                        ),
+                        FilterChip(
+                          label: const Text('OUT'),
+                          selected: filter == 'OUT',
+                          onSelected: (_) => setState(() => filter = 'OUT'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // 5. Transaction List with Swipe-to-delete, Long-press-to-confirm, and Tap-to-edit
+              if (filteredList.isEmpty)
+                Container(
+                  padding: const EdgeInsets.all(40),
+                  alignment: Alignment.center,
+                  child: const Text(
+                    'No transactions to display',
+                    style: TextStyle(color: Colors.grey, fontSize: 16),
                   ),
                 )
               else
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
-                  sliver: SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) {
-                        final t = filteredTxns[index];
-                        final isPlus = t.isIn;
-                        final amountSign = isPlus ? '+' : '-';
-                        final amountColor =
-                            isPlus ? Colors.green.shade700 : Colors.red.shade700;
-
-                        return Card(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            side: BorderSide(color: Colors.grey.shade200),
+                ...filteredList.map((tx) {
+                  return Dismissible(
+                    key: Key(tx.id),
+                    direction: DismissDirection.endToStart,
+                    confirmDismiss: (_) async {
+                      await _delete(context, tx);
+                      return false; // let the stream update the list
+                    },
+                    background: Container(
+                      color: Colors.red,
+                      alignment: Alignment.centerRight,
+                      padding: const EdgeInsets.only(right: 20),
+                      child: const Icon(Icons.delete, color: Colors.white),
+                    ),
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: tx.isIn
+                            ? const Color(0x264CAF50)
+                            : const Color(0x26F44336),
+                        child: Icon(
+                          tx.isIn ? Icons.arrow_downward : Icons.arrow_upward,
+                          color: tx.isIn ? Colors.green[800] : Colors.red[800],
+                        ),
+                      ),
+                      title: Text(
+                        tx.title,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      subtitle: Text(
+                        '${tx.createdAt.hour.toString().padLeft(2, '0')}:${tx.createdAt.minute.toString().padLeft(2, '0')} · ${tx.createdAt.day}/${tx.createdAt.month}/${tx.createdAt.year}',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '${tx.isIn ? '+' : '-'}${formatRwf(tx.amount)} RWF',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: tx.isIn ? Colors.green[700] : Colors.red[700],
+                            ),
                           ),
-                          child: ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: isPlus
-                                  ? Colors.green.shade50
-                                  : Colors.red.shade50,
-                              child: Icon(
-                                isPlus ? Icons.arrow_downward : Icons.arrow_upward,
-                                color: isPlus ? Colors.green : Colors.red,
-                              ),
-                            ),
-                            title: Text(
-                              t.description,
-                              style: const TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                            subtitle: Text(
-                              t.createdAt != null
-                                  ? '${t.createdAt!.hour.toString().padLeft(2, '0')}:${t.createdAt!.minute.toString().padLeft(2, '0')}'
-                                  : 'Just now',
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                            trailing: Text(
-                              '$amountSign${t.amount} RWF',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: amountColor,
-                                fontSize: 14,
-                              ),
-                            ),
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => TxnForm(txn: t),
-                              ),
-                            ),
-                            onLongPress: () => _delete(context, t),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, size: 20),
+                            tooltip: 'Delete',
+                            onPressed: () => _delete(context, tx),
+                          ),
+                        ],
+                      ),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => TxnEditForm(txn: tx),
                           ),
                         );
                       },
-                      childCount: filteredTxns.length,
+                      onLongPress: () => _delete(context, tx),
                     ),
-                  ),
-                ),
+                  );
+                }),
             ],
           );
         },
@@ -1153,7 +1221,7 @@ class _WalletScreenState extends State<WalletScreen> {
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => const TxnForm()),
+            MaterialPageRoute(builder: (_) => const TxnEditForm()),
           );
         },
         child: const Icon(Icons.add),
@@ -1163,20 +1231,122 @@ class _WalletScreenState extends State<WalletScreen> {
 }
 
 // ============================================================================
-// 5. TRANSACTION FORM (Step 3 Add & Step 5 Edit)
+// 6. ACTION BUTTON & STAT CARD COMPONENTS (Original Styling)
 // ============================================================================
 
-class TxnForm extends StatefulWidget {
-  const TxnForm({super.key, this.txn});
-  final Txn? txn;
+class _ActionButton extends StatelessWidget {
+  const _ActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
 
   @override
-  State<TxnForm> createState() => _TxnFormState();
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0x14000000),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: Colors.black, size: 24),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Colors.black,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-class _TxnFormState extends State<TxnForm> {
+class _StatCard extends StatelessWidget {
+  const _StatCard({
+    required this.title,
+    required this.value,
+    required this.color,
+    required this.icon,
+  });
+
+  final String title;
+  final String value;
+  final Color color;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 4),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black54,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: color,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// 7. EDIT & ADD TRANSACTION FORM (Session 6 Step 5)
+// ============================================================================
+
+class TxnEditForm extends StatefulWidget {
+  const TxnEditForm({super.key, this.txn});
+  final TransactionItem? txn;
+
+  @override
+  State<TxnEditForm> createState() => _TxnEditFormState();
+}
+
+class _TxnEditFormState extends State<TxnEditForm> {
   final _formKey = GlobalKey<FormState>();
-  late final TextEditingController _descriptionController;
+  late final TextEditingController _titleController;
   late final TextEditingController _amountController;
   late bool _isIn;
   bool _busy = false;
@@ -1184,8 +1354,8 @@ class _TxnFormState extends State<TxnForm> {
   @override
   void initState() {
     super.initState();
-    _descriptionController =
-        TextEditingController(text: widget.txn?.description ?? '');
+    _titleController =
+        TextEditingController(text: widget.txn?.title ?? '');
     _amountController = TextEditingController(
         text: widget.txn != null ? widget.txn!.amount.toString() : '');
     _isIn = widget.txn?.isIn ?? true;
@@ -1193,14 +1363,14 @@ class _TxnFormState extends State<TxnForm> {
 
   @override
   void dispose() {
-    _descriptionController.dispose();
+    _titleController.dispose();
     _amountController.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
-    final description = _descriptionController.text.trim();
+    final title = _titleController.text.trim();
     final amount = int.parse(_amountController.text.trim());
     final uid = FirebaseBackend.instance.currentUser?.uid;
     if (uid == null) return;
@@ -1208,7 +1378,7 @@ class _TxnFormState extends State<TxnForm> {
     setState(() => _busy = true);
     try {
       final txnData = {
-        'description': description,
+        'title': title,
         'amount': amount,
         'isIn': _isIn,
       };
@@ -1277,7 +1447,7 @@ class _TxnFormState extends State<TxnForm> {
                 ),
                 const SizedBox(height: 20),
                 TextFormField(
-                  controller: _descriptionController,
+                  controller: _titleController,
                   decoration: const InputDecoration(
                     labelText: 'Description',
                     hintText: 'e.g. Keza, Salary, Transport',
@@ -1306,7 +1476,7 @@ class _TxnFormState extends State<TxnForm> {
                   onPressed: _busy ? null : _save,
                   style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
-                    backgroundColor: const Color(0xFFE5A800),
+                    backgroundColor: const Color(0xFFFFCC00),
                     foregroundColor: Colors.black,
                   ),
                   child: _busy
@@ -1330,41 +1500,58 @@ class _TxnFormState extends State<TxnForm> {
 }
 
 // ============================================================================
-// 6. SEND & CASH OUT SCREENS
+// 8. SEND MONEY SCREEN (Original Lab 2)
 // ============================================================================
 
-class SendScreen extends StatefulWidget {
-  const SendScreen({super.key, required this.currentBalance});
+class SendMoneyScreen extends StatefulWidget {
+  const SendMoneyScreen({super.key, required this.currentBalance});
   final int currentBalance;
 
   @override
-  State<SendScreen> createState() => _SendScreenState();
+  State<SendMoneyScreen> createState() => _SendMoneyScreenState();
 }
 
-class _SendScreenState extends State<SendScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _phoneController = TextEditingController();
-  final _amountController = TextEditingController();
+class _SendMoneyScreenState extends State<SendMoneyScreen> {
+  final phoneController = TextEditingController();
+  final amountController = TextEditingController();
   bool _busy = false;
 
   @override
   void dispose() {
-    _phoneController.dispose();
-    _amountController.dispose();
+    phoneController.dispose();
+    amountController.dispose();
     super.dispose();
   }
 
-  Future<void> _sendMoney() async {
-    if (!_formKey.currentState!.validate()) return;
-    final phone = _phoneController.text.trim();
-    final amount = int.parse(_amountController.text.trim());
+  Future<void> _handleSend() async {
+    final phone = phoneController.text.trim();
+    final amountText = amountController.text.trim();
+    final amount = int.tryParse(amountText);
+
+    if (phone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter recipient phone number')),
+      );
+      return;
+    }
+
+    if (!RegExp(r'^(078|079)\d{7}$').hasMatch(phone)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Phone number must start with 078 or 079 and be 10 digits')),
+      );
+      return;
+    }
+
+    if (amount == null || amount < 100) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Minimum transfer amount is 100 RWF')),
+      );
+      return;
+    }
 
     if (amount > widget.currentBalance) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Insufficient funds for this transfer!'),
-          backgroundColor: Colors.red,
-        ),
+        const SnackBar(content: Text('Insufficient balance for this transfer!')),
       );
       return;
     }
@@ -1375,7 +1562,7 @@ class _SendScreenState extends State<SendScreen> {
     setState(() => _busy = true);
     try {
       await FirebaseBackend.instance.addTransaction(uid, {
-        'description': 'Sent to $phone',
+        'title': 'Sent to $phone',
         'amount': amount,
         'isIn': false,
         'createdAt': DateTime.now(),
@@ -1384,10 +1571,7 @@ class _SendScreenState extends State<SendScreen> {
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Successfully sent $amount RWF to $phone'),
-            backgroundColor: Colors.green[800],
-          ),
+          SnackBar(content: Text('Successfully sent ${formatRwf(amount)} RWF to $phone')),
         );
       }
     } catch (e) {
@@ -1405,139 +1589,118 @@ class _SendScreenState extends State<SendScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Send Money')),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.amber.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.amber.shade200),
-                  ),
-                  child: Row(
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.amber[50],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.amber[200]!),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.account_balance_wallet, color: Colors.amber),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.account_balance_wallet, color: Colors.amber),
-                      const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('Available Balance',
-                              style: TextStyle(fontSize: 12, color: Colors.black54)),
-                          Text(
-                            '${widget.currentBalance} RWF',
-                            style: const TextStyle(
-                                fontSize: 18, fontWeight: FontWeight.bold),
-                          ),
-                        ],
+                      const Text('Available Balance', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                      Text(
+                        '${formatRwf(widget.currentBalance)} RWF',
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 24),
-                TextFormField(
-                  controller: _phoneController,
-                  keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: 'MTN Recipient Phone Number',
-                    hintText: '078XXXXXXX or 079XXXXXXX',
-                    prefixIcon: Icon(Icons.phone_android),
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (val) {
-                    final p = (val ?? '').trim();
-                    if (p.isEmpty) return 'Enter a recipient phone number';
-                    if (!RegExp(r'^(078|079)\d{7}$').hasMatch(p)) {
-                      return 'Must be 10 digits starting with 078 or 079';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _amountController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Amount (RWF)',
-                    hintText: 'Minimum 100 RWF',
-                    prefixIcon: Icon(Icons.money),
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (val) {
-                    final n = int.tryParse((val ?? '').trim());
-                    if (n == null || n < 100) {
-                      return 'Minimum transfer amount is 100 RWF';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 28),
-                FilledButton(
-                  onPressed: _busy ? null : _sendMoney,
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    backgroundColor: const Color(0xFFE5A800),
-                    foregroundColor: Colors.black,
-                  ),
-                  child: _busy
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text(
-                          'Confirm & Transfer',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: phoneController,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: 'Recipient Phone Number',
+                hintText: '078XXXXXXX or 079XXXXXXX',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.phone),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: amountController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Amount (RWF)',
+                hintText: 'Minimum 100 RWF',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.money),
+              ),
+            ),
+            const SizedBox(height: 24),
+            FilledButton(
+              onPressed: _busy ? null : _handleSend,
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFFFCC00),
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+              child: _busy
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Send Money', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class CashOutScreen extends StatefulWidget {
-  const CashOutScreen({super.key, required this.currentBalance});
+// ============================================================================
+// 9. AGENT CASH OUT SCREEN (Original Lab 6)
+// ============================================================================
+
+class AgentCashOutScreen extends StatefulWidget {
+  const AgentCashOutScreen({super.key, required this.currentBalance});
   final int currentBalance;
 
   @override
-  State<CashOutScreen> createState() => _CashOutScreenState();
+  State<AgentCashOutScreen> createState() => _AgentCashOutScreenState();
 }
 
-class _CashOutScreenState extends State<CashOutScreen> {
-  final _amountController = TextEditingController();
-  int _calculatedAmount = 0;
+class _AgentCashOutScreenState extends State<AgentCashOutScreen> {
+  final amountController = TextEditingController();
+  int calculatedAmount = 0;
   bool _busy = false;
 
-  final List<int> _currencyNotes = [5000, 2000, 1000, 500, 100];
+  final List<int> notes = [5000, 2000, 1000, 500, 100];
 
   @override
   void initState() {
     super.initState();
-    _amountController.addListener(() {
-      final val = int.tryParse(_amountController.text.trim()) ?? 0;
-      setState(() => _calculatedAmount = val);
+    amountController.addListener(() {
+      final val = int.tryParse(amountController.text.trim()) ?? 0;
+      setState(() => calculatedAmount = val);
     });
   }
 
   @override
   void dispose() {
-    _amountController.dispose();
+    amountController.dispose();
     super.dispose();
   }
 
-  Map<int, int> _calculateNoteBreakdown(int total) {
+  Map<int, int> getNoteBreakdown(int total) {
     final breakdown = <int, int>{};
     int remaining = total;
-    for (final note in _currencyNotes) {
+    for (final note in notes) {
       final count = remaining ~/ note;
       if (count > 0) {
         breakdown[note] = count;
@@ -1547,8 +1710,8 @@ class _CashOutScreenState extends State<CashOutScreen> {
     return breakdown;
   }
 
-  Future<void> _processCashOut() async {
-    final amount = _calculatedAmount;
+  Future<void> _handleCashOut() async {
+    final amount = calculatedAmount;
     if (amount <= 0 || amount % 100 != 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Amount must be a multiple of 100 RWF')),
@@ -1557,10 +1720,7 @@ class _CashOutScreenState extends State<CashOutScreen> {
     }
     if (amount > widget.currentBalance) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Insufficient balance for cash-out!'),
-          backgroundColor: Colors.red,
-        ),
+        const SnackBar(content: Text('Insufficient balance for cash-out!')),
       );
       return;
     }
@@ -1571,7 +1731,7 @@ class _CashOutScreenState extends State<CashOutScreen> {
     setState(() => _busy = true);
     try {
       await FirebaseBackend.instance.addTransaction(uid, {
-        'description': 'Cash out at MoMo agent',
+        'title': 'Cash out at MoMo agent',
         'amount': amount,
         'isIn': false,
         'createdAt': DateTime.now(),
@@ -1580,10 +1740,7 @@ class _CashOutScreenState extends State<CashOutScreen> {
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Successfully cashed out $amount RWF'),
-            backgroundColor: Colors.green[800],
-          ),
+          SnackBar(content: Text('Successfully cashed out ${formatRwf(amount)} RWF')),
         );
       }
     } catch (e) {
@@ -1599,90 +1756,79 @@ class _CashOutScreenState extends State<CashOutScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final breakdown = _calculateNoteBreakdown(_calculatedAmount);
+    final breakdown = getNoteBreakdown(calculatedAmount);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Agent Cash Out')),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextField(
-                controller: _amountController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Withdrawal Amount (RWF)',
-                  hintText: 'Must be multiple of 100',
-                  prefixIcon: Icon(Icons.point_of_sale),
-                  border: OutlineInputBorder(),
-                ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: amountController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Amount (Multiple of 100)',
+                hintText: 'e.g. 7500',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.payments),
               ),
-              const SizedBox(height: 20),
-              Card(
-                elevation: 0,
-                color: Colors.grey.shade100,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: Colors.grey.shade300),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Currency Notes Breakdown',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
-                      const SizedBox(height: 8),
-                      if (breakdown.isEmpty)
-                        const Text(
-                          'Enter an amount to calculate physical currency notes.',
-                          style: TextStyle(color: Colors.grey, fontSize: 13),
-                        )
-                      else
-                        ...breakdown.entries.map(
-                          (e) => Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text('${e.key} RWF Note'),
-                                Text(
-                                  '× ${e.value}',
-                                  style: const TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                              ],
-                            ),
+            ),
+            const SizedBox(height: 20),
+            Card(
+              elevation: 0,
+              color: Colors.grey[100],
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: Colors.grey[300]!),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Note Breakdown',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                    const SizedBox(height: 8),
+                    if (breakdown.isEmpty)
+                      const Text('Enter an amount to see notes breakdown', style: TextStyle(color: Colors.grey))
+                    else
+                      ...breakdown.entries.map(
+                        (e) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('${formatRwf(e.key)} RWF Note'),
+                              Text('× ${e.value}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                            ],
                           ),
                         ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 28),
-              FilledButton(
-                onPressed: _busy ? null : _processCashOut,
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  backgroundColor: const Color(0xFFE5A800),
-                  foregroundColor: Colors.black,
-                ),
-                child: _busy
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text(
-                        'Confirm Cash Out',
-                        style: TextStyle(fontWeight: FontWeight.bold),
                       ),
+                  ],
+                ),
               ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 24),
+            FilledButton(
+              onPressed: _busy ? null : _handleCashOut,
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFFFCC00),
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+              child: _busy
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Confirm Cash Out', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
         ),
       ),
     );
@@ -1690,104 +1836,107 @@ class _CashOutScreenState extends State<CashOutScreen> {
 }
 
 // ============================================================================
-// 7. PHONE DEVICE FRAME SIMULATION (For Professional DartPad Screenshots)
+// 10. EXACT ORIGINAL DARTPAD PHONE DEVICE FRAME SIMULATOR
 // ============================================================================
 
 class _PhoneDeviceFrame extends StatelessWidget {
   const _PhoneDeviceFrame({required this.child});
+
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: const Color(0xFF1E1E24), // Background canvas
+      color: const Color(0xFF1E1E28), // Soft studio backdrop
       alignment: Alignment.center,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 12),
       child: FittedBox(
-        fit: BoxFit.contain,
+        fit: BoxFit.scaleDown,
         child: Container(
           width: 390,
-          height: 844, // iPhone aspect ratio
+          height: 820,
           decoration: BoxDecoration(
             color: Colors.black,
             borderRadius: BorderRadius.circular(48),
+            border: Border.all(color: const Color(0xFF2C2F38), width: 9),
             boxShadow: const [
               BoxShadow(
-                color: Colors.black54,
-                blurRadius: 28,
-                offset: Offset(0, 14),
+                color: Color(0x66000000),
+                blurRadius: 35,
+                spreadRadius: 2,
+                offset: Offset(0, 15),
               ),
             ],
-            border: Border.all(color: const Color(0xFF333338), width: 9),
           ),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(40),
+            borderRadius: BorderRadius.circular(39),
             child: Stack(
               children: [
-                // Inner Screen Content
-                Positioned.fill(
-                  child: Padding(
+                // Inner Screen with mobile status bar insets
+                MediaQuery(
+                  data: MediaQuery.of(context).copyWith(
                     padding: const EdgeInsets.only(top: 36, bottom: 20),
-                    child: child,
                   ),
+                  child: child,
                 ),
 
-                // Top Status Bar & Dynamic Island
+                // Simulated Top Status Bar
                 Positioned(
                   top: 0,
                   left: 0,
                   right: 0,
-                  height: 38,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    color: Colors.transparent,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          '9:41',
-                          style: TextStyle(
-                            color: Colors.black,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
+                  child: IgnorePointer(
+                    child: Container(
+                      height: 38,
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            '09:41',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.black,
+                            ),
                           ),
-                        ),
-                        Container(
-                          width: 110,
-                          height: 22,
-                          decoration: BoxDecoration(
-                            color: Colors.black,
-                            borderRadius: BorderRadius.circular(16),
+                          Container(
+                            width: 85,
+                            height: 20,
+                            decoration: BoxDecoration(
+                              color: Colors.black,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                           ),
-                        ),
-                        const Row(
-                          children: [
-                            Icon(Icons.signal_cellular_alt,
-                                size: 14, color: Colors.black),
-                            SizedBox(width: 4),
-                            Icon(Icons.wifi, size: 14, color: Colors.black),
-                            SizedBox(width: 4),
-                            Icon(Icons.battery_full,
-                                size: 16, color: Colors.black),
-                          ],
-                        ),
-                      ],
+                          const Row(
+                            children: [
+                              Icon(Icons.signal_cellular_4_bar, size: 14, color: Colors.black),
+                              SizedBox(width: 4),
+                              Icon(Icons.wifi, size: 14, color: Colors.black),
+                              SizedBox(width: 4),
+                              Icon(Icons.battery_full, size: 16, color: Colors.black),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
 
-                // Bottom Home Indicator Bar
+                // Simulated Bottom Home Indicator
                 Positioned(
                   bottom: 6,
                   left: 0,
                   right: 0,
-                  child: Center(
-                    child: Container(
-                      width: 134,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.black38,
-                        borderRadius: BorderRadius.circular(2),
+                  child: IgnorePointer(
+                    child: Center(
+                      child: Container(
+                        width: 120,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.black45,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
                       ),
                     ),
                   ),
