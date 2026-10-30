@@ -626,35 +626,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       padding: EdgeInsets.only(top: 16),
                       child: Center(child: CircularProgressIndicator()),
                     ),
-                  const SizedBox(height: 20),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    alignment: WrapAlignment.center,
-                    children: [
-                      ActionChip(
-                        avatar: const Icon(Icons.person, size: 14),
-                        label: const Text('Account 1 (Aline)',
-                            style: TextStyle(fontSize: 11)),
-                        onPressed: () =>
-                            _fillSample('aline@gmail.com', 'password123'),
-                      ),
-                      ActionChip(
-                        avatar: const Icon(Icons.person_add, size: 14),
-                        label: const Text('Account 2 (Eric)',
-                            style: TextStyle(fontSize: 11)),
-                        onPressed: () =>
-                            _fillSample('eric@gmail.com', 'secret456'),
-                      ),
-                      ActionChip(
-                        avatar: const Icon(Icons.warning, size: 14),
-                        label: const Text('Test Wrong Password',
-                            style: TextStyle(fontSize: 11)),
-                        onPressed: () =>
-                            _fillSample('aline@gmail.com', 'wrongpassword'),
-                      ),
-                    ],
-                  ),
+                  
                 ],
               ),
             ),
