@@ -4,10 +4,10 @@ A mobile money wallet simulation app inspired by MTN Mobile Money in Rwanda. It 
 
 ## Screenshots
 
-- Login: ![Login](screenshots/login.png)
+- Login: <br>![Login](screenshots/login.png)
 - My data in Firestore: ![My data in Firestore](screenshots/console.png)
 - Live update: ![Live update](screenshots/live.png)
-- Second account sees nothing of mine: ![Second account sees nothing of mine](screenshots/denied.png)
+- Second account sees nothing of mine: <br>![Second account sees nothing of mine](screenshots/denied.png)
 
 ---
 
