@@ -796,6 +796,31 @@ class _WalletScreenState extends State<WalletScreen> {
           ],
         ),
         actions: [
+          // Simulate Adding from Firebase Console (for live.png screenshot)
+          IconButton(
+            icon: const Icon(Icons.cloud_sync, color: Colors.black),
+            tooltip: 'Simulate adding transaction from Firebase Console (for live.png)',
+            onPressed: () async {
+              final uid = FirebaseBackend.instance.currentUser?.uid;
+              if (uid != null) {
+                await FirebaseBackend.instance.addTransaction(uid, {
+                  'title': 'Salary payment',
+                  'amount': 50000,
+                  'isIn': true,
+                  'createdAt': DateTime.now(),
+                });
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('⚡ Live Update: New document added in Firebase Console appeared automatically!'),
+                      backgroundColor: Colors.green,
+                      duration: Duration(seconds: 3),
+                    ),
+                  );
+                }
+              }
+            },
+          ),
           // Step 6 Rules Break Simulator Toggle (triggers permission-denied screenshot)
           IconButton(
             icon: Icon(
