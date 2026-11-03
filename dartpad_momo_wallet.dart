@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -283,6 +284,17 @@ class FirebaseBackend {
     _emitSnapshot(uid);
   }
 
+    Future<void> addSampleTransactions(String uid) async {
+    final samples = [
+      {'title': 'Opening balance', 'amount': 10000, 'isIn': true, 'createdAt': DateTime.now().subtract(const Duration(hours: 3))},
+      {'title': 'Sent to 0788123456', 'amount': 2500, 'isIn': false, 'createdAt': DateTime.now().subtract(const Duration(hours: 2))},
+      {'title': 'Received from Keza', 'amount': 4000, 'isIn': true, 'createdAt': DateTime.now().subtract(const Duration(hours: 1))},
+    ];
+    for (final s in samples) {
+      await addTransaction(uid, s);
+    }
+  }
+
   void toggleRuleViolation() {
     rulesViolated = !rulesViolated;
     if (_currentUser != null) {
@@ -322,6 +334,109 @@ class TransactionItem {
       isIn: data['isIn'] as bool,
       createdAt: (data['createdAt'] as DateTime?) ?? DateTime.now(),
     );
+  }
+}
+
+
+// ============================================================================
+// 1B. REPOSITORY & STATE MANAGEMENT (Session 7 Provider Brain)
+// ============================================================================
+
+class TxnRepository {
+  TxnRepository(this.uid);
+  final String uid;
+
+  Stream<List<TransactionItem>> watchAll() {
+    return FirebaseBackend.instance
+        .streamTransactions(uid)
+        .map((snap) => snap.docs.map(TransactionItem.fromDoc).toList());
+  }
+
+  Future<void> add(TransactionItem txn) =>
+      FirebaseBackend.instance.addTransaction(uid, txn.toMap());
+
+  Future<void> update(String id, TransactionItem txn) =>
+      FirebaseBackend.instance.updateTransaction(uid, id, txn.toMap());
+
+  Future<void> delete(String id) =>
+      FirebaseBackend.instance.deleteTransaction(uid, id);
+
+  Future<void> restore(TransactionItem txn) =>
+      FirebaseBackend.instance.restoreTransaction(uid, txn.id, {
+        ...txn.toMap(),
+        'createdAt': txn.createdAt,
+      });
+
+  Future<void> addSamples() =>
+      FirebaseBackend.instance.addSampleTransactions(uid);
+}
+
+class WalletState extends ChangeNotifier {
+  WalletState(this._repo) {
+    debugPrint('Brain born for ${_repo.uid}');
+    _subscription = _repo.watchAll().listen(
+      (list) {
+        _transactions = list;
+        _loading = false;
+        _error = null;
+        notifyListeners();
+      },
+      onError: (Object e) {
+        _loading = false;
+        _error = 'Could not load your transactions.\n$e';
+        notifyListeners();
+      },
+    );
+  }
+
+  final TxnRepository _repo;
+  StreamSubscription<List<TransactionItem>>? _subscription;
+
+  List<TransactionItem> _transactions = [];
+  bool _loading = true;
+  String? _error;
+  String _filter = 'All'; // 'All', 'IN', 'OUT'
+
+  List<TransactionItem> get transactions => _transactions;
+  bool get loading => _loading;
+  String? get error => _error;
+  String get filter => _filter;
+
+  // Habit 2: computed state
+  int get balance => _transactions.fold<int>(
+        0,
+        (total, t) => t.isIn ? total + t.amount : total - t.amount,
+      );
+
+  int get totalIn => _transactions
+      .where((t) => t.isIn)
+      .fold<int>(0, (acc, t) => acc + t.amount);
+
+  int get totalOut => _transactions
+      .where((t) => !t.isIn)
+      .fold<int>(0, (acc, t) => acc + t.amount);
+
+  List<TransactionItem> get visible {
+    if (_filter == 'IN') return _transactions.where((t) => t.isIn).toList();
+    if (_filter == 'OUT') return _transactions.where((t) => !t.isIn).toList();
+    return _transactions;
+  }
+
+  void setFilter(String value) {
+    _filter = value;
+    notifyListeners();
+  }
+
+  Future<void> add(TransactionItem txn) => _repo.add(txn);
+  Future<void> edit(String id, TransactionItem txn) => _repo.update(id, txn);
+  Future<void> remove(TransactionItem txn) => _repo.delete(txn.id);
+  Future<void> restore(TransactionItem txn) => _repo.restore(txn);
+
+  @override
+  void dispose() {
+    debugPrint('Brain disposed: pipe closed');
+    _subscription?.cancel();
+    super.dispose();
   }
 }
 
@@ -386,7 +501,11 @@ class AuthGate extends StatelessWidget {
         if (user == null) {
           return const LoginScreen();
         }
-        return const WalletScreen();
+        // Signed in: One central brain for this user (Session 7 Step 12)
+        return ChangeNotifierProvider<WalletState>(
+          create: (_) => WalletState(TxnRepository(user.uid)),
+          child: const WalletScreen(),
+        );
       },
     );
   }
@@ -462,13 +581,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  void _fillSample(String email, String pass) {
-    setState(() {
-      _email.text = email;
-      _password.text = pass;
-      _error = null;
-    });
-  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -650,9 +763,48 @@ class WalletScreen extends StatefulWidget {
 
 class _WalletScreenState extends State<WalletScreen> {
   static const int startingCapital = 10000;
-  String filter = 'All'; // 'All', 'IN', 'OUT'
+
+  void _openForm(BuildContext context, TransactionItem? txn) {
+    final wallet = context.read<WalletState>();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChangeNotifierProvider<WalletState>.value(
+          value: wallet,
+          child: TxnEditForm(txn: txn),
+        ),
+      ),
+    );
+  }
+
+  void _openSend(BuildContext context) {
+    final wallet = context.read<WalletState>();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChangeNotifierProvider<WalletState>.value(
+          value: wallet,
+          child: const SendMoneyScreen(),
+        ),
+      ),
+    );
+  }
+
+  void _openCashOut(BuildContext context) {
+    final wallet = context.read<WalletState>();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChangeNotifierProvider<WalletState>.value(
+          value: wallet,
+          child: const AgentCashOutScreen(),
+        ),
+      ),
+    );
+  }
 
   Future<void> _delete(BuildContext context, TransactionItem txn) async {
+    final wallet = context.read<WalletState>();
     final sure = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -673,10 +825,8 @@ class _WalletScreenState extends State<WalletScreen> {
     );
 
     if (sure == true) {
-      final uid = FirebaseBackend.instance.currentUser?.uid;
-      if (uid == null) return;
       try {
-        await FirebaseBackend.instance.deleteTransaction(uid, txn.id);
+        await wallet.remove(txn);
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -684,11 +834,7 @@ class _WalletScreenState extends State<WalletScreen> {
               action: SnackBarAction(
                 label: 'Undo',
                 onPressed: () async {
-                  await FirebaseBackend.instance.restoreTransaction(
-                    uid,
-                    txn.id,
-                    txn.toMap(),
-                  );
+                  await wallet.restore(txn);
                 },
               ),
             ),
@@ -708,6 +854,7 @@ class _WalletScreenState extends State<WalletScreen> {
   }
 
   void _promptReceiveMoney(BuildContext context) {
+    final wallet = context.read<WalletState>();
     final descController = TextEditingController();
     final amountController = TextEditingController();
 
@@ -749,16 +896,14 @@ class _WalletScreenState extends State<WalletScreen> {
               final amount = int.tryParse(amountController.text.trim());
               if (desc.isEmpty || amount == null || amount <= 0) return;
 
-              final uid = FirebaseBackend.instance.currentUser?.uid;
-              if (uid == null) return;
-
               Navigator.pop(ctx);
-              await FirebaseBackend.instance.addTransaction(uid, {
-                'title': 'Received from $desc',
-                'amount': amount,
-                'isIn': true,
-                'createdAt': DateTime.now(),
-              });
+              await wallet.add(TransactionItem(
+                id: '',
+                title: 'Received from $desc',
+                amount: amount,
+                isIn: true,
+                createdAt: DateTime.now(),
+              ));
             },
             child: const Text('Receive'),
           ),
@@ -771,7 +916,7 @@ class _WalletScreenState extends State<WalletScreen> {
   Widget build(BuildContext context) {
     final user = FirebaseBackend.instance.currentUser;
     final userEmail = user?.email ?? 'User';
-    final uid = user?.uid ?? '';
+    final wallet = context.watch<WalletState>();
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -796,10 +941,10 @@ class _WalletScreenState extends State<WalletScreen> {
           ],
         ),
         actions: [
-          // Simulate Adding from Firebase Console (for live.png screenshot)
+          // Simulate Adding from Firebase Console (Live update proof)
           IconButton(
             icon: const Icon(Icons.cloud_sync, color: Colors.black),
-            tooltip: 'Simulate adding transaction from Firebase Console (for live.png)',
+            tooltip: 'Simulate adding transaction from Firebase Console',
             onPressed: () async {
               final uid = FirebaseBackend.instance.currentUser?.uid;
               if (uid != null) {
@@ -812,7 +957,7 @@ class _WalletScreenState extends State<WalletScreen> {
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('⚡ Live Update: New document added in Firebase Console appeared automatically!'),
+                      content: Text('⚡ Live Update: New document arrived from backend, State updated automatically!'),
                       backgroundColor: Colors.green,
                       duration: Duration(seconds: 3),
                     ),
@@ -821,7 +966,7 @@ class _WalletScreenState extends State<WalletScreen> {
               }
             },
           ),
-          // Step 6 Rules Break Simulator Toggle (triggers permission-denied screenshot)
+          // Rule violation simulator toggle
           IconButton(
             icon: Icon(
               FirebaseBackend.instance.rulesViolated
@@ -850,7 +995,6 @@ class _WalletScreenState extends State<WalletScreen> {
               );
             },
           ),
-          // Step 2 Logout Button
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Log out',
@@ -858,379 +1002,326 @@ class _WalletScreenState extends State<WalletScreen> {
           ),
         ],
       ),
-      body: StreamBuilder<MockQuerySnapshot>(
-        stream: FirebaseBackend.instance.streamTransactions(uid),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.gpp_bad, color: Colors.red, size: 54),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Could not load your transactions.\n${snapshot.error}',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.red,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    FilledButton.tonal(
-                      onPressed: () {
-                        setState(() {
-                          FirebaseBackend.instance.toggleRuleViolation();
-                        });
-                      },
-                      child: const Text('Restore Database Access'),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          final txns = snapshot.data!.docs
-              .map(TransactionItem.fromDoc)
-              .toList();
-
-          // Save facts. Compute the rest dynamically:
-          final currentBalance = txns.fold<int>(
-            0,
-            (total, t) => t.isIn ? total + t.amount : total - t.amount,
-          );
-          final totalIn = txns.where((t) => t.isIn).fold<int>(
-                0,
-                (acc, t) => acc + t.amount,
-              );
-          final totalOut = txns.where((t) => !t.isIn).fold<int>(
-                0,
-                (acc, t) => acc + t.amount,
-              );
-
-          int lowestBalance = startingCapital;
-          if (txns.isNotEmpty) {
-            final chronological = List<TransactionItem>.from(txns)
-              ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
-            int running = 0;
-            lowestBalance = chronological.first.amount;
-            for (final tx in chronological) {
-              running += tx.isIn ? tx.amount : -tx.amount;
-              if (running < lowestBalance) lowestBalance = running;
-            }
-          }
-
-          final filteredList = txns.where((tx) {
-            if (filter == 'IN') return tx.isIn;
-            if (filter == 'OUT') return !tx.isIn;
-            return true;
-          }).toList();
-
-          return ListView(
-            padding: const EdgeInsets.only(bottom: 80),
-            children: [
-              // 1. Available Balance Yellow Card with Action Buttons Inside (Original Design)
-              Container(
-                margin: const EdgeInsets.all(16),
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFCC00),
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Color(0x26000000),
-                      blurRadius: 10,
-                      offset: Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Available Balance',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      '${formatRwf(currentBalance)} RWF',
-                      style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.w900,
-                        color: Colors.black,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    // Action Buttons Row Inside Card
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        _ActionButton(
-                          icon: Icons.send,
-                          label: 'Send',
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    SendMoneyScreen(currentBalance: currentBalance),
-                              ),
-                            );
-                          },
-                        ),
-                        _ActionButton(
-                          icon: Icons.local_atm,
-                          label: 'Cash Out',
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    AgentCashOutScreen(currentBalance: currentBalance),
-                              ),
-                            );
-                          },
-                        ),
-                        _ActionButton(
-                          icon: Icons.call_received,
-                          label: 'Receive',
-                          onTap: () => _promptReceiveMoney(context),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-
-              // 2. Statistics Row: Total IN, Total OUT, Lowest (Original Design)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Total IN',
-                        value: '+${formatRwf(totalIn)} RWF',
-                        color: Colors.green[700]!,
-                        icon: Icons.arrow_downward,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Total OUT',
-                        value: '-${formatRwf(totalOut)} RWF',
-                        color: Colors.red[700]!,
-                        icon: Icons.arrow_upward,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Lowest',
-                        value: '${formatRwf(lowestBalance)} RWF',
-                        color: Colors.blue[800]!,
-                        icon: Icons.trending_down,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // 3. Cloud Synced Badge & Weather Card
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFF8E1),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: const Color(0xFFFFE082)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.cloud_done, color: Color(0xFFE5A800), size: 26),
-                    const SizedBox(width: 10),
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Kigali 27°C · Cloudy',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black87,
-                            ),
-                          ),
-                          Text(
-                            'Cloud Firestore · Synced & Private',
-                            style: TextStyle(fontSize: 11, color: Colors.black54),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE5A800),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Text(
-                        'Live',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // 4. Section Title & Filter Chips
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                child: Row(
-                  children: [
-                    const Text(
-                      'Transactions',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                    ),
-                    const Spacer(),
-                    Wrap(
-                      spacing: 6,
-                      children: [
-                        FilterChip(
-                          label: const Text('All'),
-                          selected: filter == 'All',
-                          onSelected: (_) => setState(() => filter = 'All'),
-                        ),
-                        FilterChip(
-                          label: const Text('IN'),
-                          selected: filter == 'IN',
-                          onSelected: (_) => setState(() => filter = 'IN'),
-                        ),
-                        FilterChip(
-                          label: const Text('OUT'),
-                          selected: filter == 'OUT',
-                          onSelected: (_) => setState(() => filter = 'OUT'),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-
-              // 5. Transaction List with Swipe-to-delete, Long-press-to-confirm, and Tap-to-edit
-              if (filteredList.isEmpty)
-                Container(
-                  padding: const EdgeInsets.all(40),
-                  alignment: Alignment.center,
-                  child: const Text(
-                    'No transactions to display',
-                    style: TextStyle(color: Colors.grey, fontSize: 16),
-                  ),
-                )
-              else
-                ...filteredList.map((tx) {
-                  return Dismissible(
-                    key: Key(tx.id),
-                    direction: DismissDirection.endToStart,
-                    confirmDismiss: (_) async {
-                      await _delete(context, tx);
-                      return false; // let the stream update the list
-                    },
-                    background: Container(
-                      color: Colors.red,
-                      alignment: Alignment.centerRight,
-                      padding: const EdgeInsets.only(right: 20),
-                      child: const Icon(Icons.delete, color: Colors.white),
-                    ),
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: tx.isIn
-                            ? const Color(0x264CAF50)
-                            : const Color(0x26F44336),
-                        child: Icon(
-                          tx.isIn ? Icons.arrow_downward : Icons.arrow_upward,
-                          color: tx.isIn ? Colors.green[800] : Colors.red[800],
-                        ),
-                      ),
-                      title: Text(
-                        tx.title,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      subtitle: Text(
-                        '${tx.createdAt.hour.toString().padLeft(2, '0')}:${tx.createdAt.minute.toString().padLeft(2, '0')} · ${tx.createdAt.day}/${tx.createdAt.month}/${tx.createdAt.year}',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            '${tx.isIn ? '+' : '-'}${formatRwf(tx.amount)} RWF',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                              color: tx.isIn ? Colors.green[700] : Colors.red[700],
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline, size: 20),
-                            tooltip: 'Delete',
-                            onPressed: () => _delete(context, tx),
-                          ),
-                        ],
-                      ),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => TxnEditForm(txn: tx),
-                          ),
-                        );
-                      },
-                      onLongPress: () => _delete(context, tx),
-                    ),
-                  );
-                }),
-            ],
-          );
-        },
-      ),
+      body: _buildBody(context, wallet),
       floatingActionButton: FloatingActionButton(
         backgroundColor: const Color(0xFFFFCC00),
         foregroundColor: Colors.black,
         tooltip: 'Add Transaction',
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const TxnEditForm()),
-          );
-        },
+        onPressed: () => _openForm(context, null),
         child: const Icon(Icons.add),
       ),
     );
   }
+
+  Widget _buildBody(BuildContext context, WalletState wallet) {
+    if (wallet.error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.gpp_bad, color: Colors.red, size: 54),
+              const SizedBox(height: 12),
+              Text(
+                wallet.error!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.red,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.tonal(
+                onPressed: () {
+                  setState(() {
+                    FirebaseBackend.instance.toggleRuleViolation();
+                  });
+                },
+                child: const Text('Restore Database Access'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (wallet.loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final txns = wallet.visible;
+    final currentBalance = wallet.balance;
+    final totalIn = wallet.totalIn;
+    final totalOut = wallet.totalOut;
+
+    int lowestBalance = startingCapital;
+    if (wallet.transactions.isNotEmpty) {
+      final chronological = List<TransactionItem>.from(wallet.transactions)
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      int running = 0;
+      lowestBalance = chronological.first.amount;
+      for (final tx in chronological) {
+        running += tx.isIn ? tx.amount : -tx.amount;
+        if (running < lowestBalance) lowestBalance = running;
+      }
+    }
+
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 80),
+      children: [
+        // 1. Available Balance Yellow Card
+        Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFCC00),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x26000000),
+                blurRadius: 10,
+                offset: Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Available Balance',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Text(
+                      'Provider State',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${formatRwf(currentBalance)} RWF',
+                style: const TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w900,
+                  color: Colors.black,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _ActionButton(
+                    icon: Icons.send,
+                    label: 'Send',
+                    onTap: () => _openSend(context),
+                  ),
+                  _ActionButton(
+                    icon: Icons.local_atm,
+                    label: 'Cash Out',
+                    onTap: () => _openCashOut(context),
+                  ),
+                  _ActionButton(
+                    icon: Icons.call_received,
+                    label: 'Receive',
+                    onTap: () => _promptReceiveMoney(context),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        // 2. Statistics Row
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: _StatCard(
+                  title: 'Total IN',
+                  value: '+${formatRwf(totalIn)} RWF',
+                  color: Colors.green[700]!,
+                  icon: Icons.arrow_downward,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _StatCard(
+                  title: 'Total OUT',
+                  value: '-${formatRwf(totalOut)} RWF',
+                  color: Colors.red[700]!,
+                  icon: Icons.arrow_upward,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _StatCard(
+                  title: 'Lowest',
+                  value: '${formatRwf(lowestBalance)} RWF',
+                  color: Colors.blue[800]!,
+                  icon: Icons.trending_down,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // 3. State Management Info Banner
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF8E1),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFFFE082)),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.hub, color: Color(0xFFF57F17), size: 20),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'One Brain (WalletState ChangeNotifier) powering all screens.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFFE65100),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // 4. Step 18 Filter Chips (ALL, IN, OUT)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: Row(
+            children: [
+              FilterChip(
+                label: const Text('All'),
+                selected: wallet.filter == 'All',
+                onSelected: (_) => context.read<WalletState>().setFilter('All'),
+                selectedColor: const Color(0xFFFFCC00),
+              ),
+              const SizedBox(width: 8),
+              FilterChip(
+                label: const Text('Money In'),
+                selected: wallet.filter == 'IN',
+                onSelected: (_) => context.read<WalletState>().setFilter('IN'),
+                selectedColor: Colors.green[100],
+              ),
+              const SizedBox(width: 8),
+              FilterChip(
+                label: const Text('Money Out'),
+                selected: wallet.filter == 'OUT',
+                onSelected: (_) => context.read<WalletState>().setFilter('OUT'),
+                selectedColor: Colors.red[100],
+              ),
+            ],
+          ),
+        ),
+
+        // 5. Transaction List
+        if (wallet.transactions.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(40),
+            alignment: Alignment.center,
+            child: Column(
+              children: [
+                Icon(Icons.receipt_long, size: 56, color: Colors.grey[400]),
+                const SizedBox(height: 12),
+                const Text(
+                  'No transactions yet',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Tap the + button to record a transaction.',
+                  style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                ),
+              ],
+            ),
+          )
+        else if (txns.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(32),
+            alignment: Alignment.center,
+            child: Text(
+              'No transactions match the "${wallet.filter}" filter.',
+              style: TextStyle(color: Colors.grey[600], fontSize: 14),
+            ),
+          )
+        else
+          ...txns.map((tx) {
+            final isPlus = tx.isIn;
+            return Card(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(color: Colors.grey[200]!),
+              ),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor:
+                      isPlus ? Colors.green[50] : Colors.red[50],
+                  child: Icon(
+                    isPlus ? Icons.arrow_downward : Icons.arrow_upward,
+                    color: isPlus ? Colors.green[700] : Colors.red[700],
+                  ),
+                ),
+                title: Text(
+                  tx.title,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text(
+                  '${tx.createdAt.hour.toString().padLeft(2, '0')}:${tx.createdAt.minute.toString().padLeft(2, '0')} · ${tx.createdAt.day}/${tx.createdAt.month}/${tx.createdAt.year}',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${isPlus ? '+' : '-'}${formatRwf(tx.amount)} RWF',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: isPlus ? Colors.green[700] : Colors.red[700],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 20),
+                      tooltip: 'Delete',
+                      onPressed: () => _delete(context, tx),
+                    ),
+                  ],
+                ),
+                onTap: () => _openForm(context, tx),
+                onLongPress: () => _delete(context, tx),
+              ),
+            );
+          }),
+      ],
+    );
+  }
 }
-
-// ============================================================================
-// 6. ACTION BUTTON & STAT CARD COMPONENTS (Original Styling)
-// ============================================================================
-
 class _ActionButton extends StatelessWidget {
   const _ActionButton({
     required this.icon,
@@ -1369,22 +1460,28 @@ class _TxnEditFormState extends State<TxnEditForm> {
     if (!_formKey.currentState!.validate()) return;
     final title = _titleController.text.trim();
     final amount = int.parse(_amountController.text.trim());
-    final uid = FirebaseBackend.instance.currentUser?.uid;
-    if (uid == null) return;
-
+    final wallet = context.read<WalletState>();
     setState(() => _busy = true);
     try {
-      final txnData = {
-        'title': title,
-        'amount': amount,
-        'isIn': _isIn,
-      };
-
       if (widget.txn == null) {
-        await FirebaseBackend.instance.addTransaction(uid, txnData);
+        await wallet.add(TransactionItem(
+          id: '',
+          title: title,
+          amount: amount,
+          isIn: _isIn,
+          createdAt: DateTime.now(),
+        ));
       } else {
-        await FirebaseBackend.instance
-            .updateTransaction(uid, widget.txn!.id, txnData);
+        await wallet.edit(
+          widget.txn!.id,
+          TransactionItem(
+            id: widget.txn!.id,
+            title: title,
+            amount: amount,
+            isIn: _isIn,
+            createdAt: widget.txn!.createdAt,
+          ),
+        );
       }
 
       if (mounted) {
@@ -1411,6 +1508,7 @@ class _TxnEditFormState extends State<TxnEditForm> {
   @override
   Widget build(BuildContext context) {
     final isEditing = widget.txn != null;
+    final balance = context.watch<WalletState>().balance;
 
     return Scaffold(
       appBar: AppBar(
@@ -1424,6 +1522,33 @@ class _TxnEditFormState extends State<TxnEditForm> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // Step 16: Live balance watched from the central brain
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFCC00).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFFFCC00)),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Your Current Balance:',
+                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                      ),
+                      Text(
+                        '${formatRwf(balance)} RWF',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 18),
                 SegmentedButton<bool>(
                   segments: const [
                     ButtonSegment(
@@ -1501,8 +1626,7 @@ class _TxnEditFormState extends State<TxnEditForm> {
 // ============================================================================
 
 class SendMoneyScreen extends StatefulWidget {
-  const SendMoneyScreen({super.key, required this.currentBalance});
-  final int currentBalance;
+  const SendMoneyScreen({super.key});
 
   @override
   State<SendMoneyScreen> createState() => _SendMoneyScreenState();
@@ -1546,24 +1670,23 @@ class _SendMoneyScreenState extends State<SendMoneyScreen> {
       return;
     }
 
-    if (amount > widget.currentBalance) {
+    final wallet = context.read<WalletState>();
+    if (amount > wallet.balance) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Insufficient balance for this transfer!')),
       );
       return;
     }
 
-    final uid = FirebaseBackend.instance.currentUser?.uid;
-    if (uid == null) return;
-
     setState(() => _busy = true);
     try {
-      await FirebaseBackend.instance.addTransaction(uid, {
-        'title': 'Sent to $phone',
-        'amount': amount,
-        'isIn': false,
-        'createdAt': DateTime.now(),
-      });
+      await wallet.add(TransactionItem(
+        id: '',
+        title: 'Sent to $phone',
+        amount: amount,
+        isIn: false,
+        createdAt: DateTime.now(),
+      ));
 
       if (mounted) {
         Navigator.pop(context);
@@ -1584,6 +1707,7 @@ class _SendMoneyScreenState extends State<SendMoneyScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final balance = context.watch<WalletState>().balance;
     return Scaffold(
       appBar: AppBar(title: const Text('Send Money')),
       body: SingleChildScrollView(
@@ -1607,7 +1731,7 @@ class _SendMoneyScreenState extends State<SendMoneyScreen> {
                     children: [
                       const Text('Available Balance', style: TextStyle(fontSize: 12, color: Colors.black54)),
                       Text(
-                        '${formatRwf(widget.currentBalance)} RWF',
+                        '${formatRwf(balance)} RWF',
                         style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                       ),
                     ],
@@ -1665,8 +1789,7 @@ class _SendMoneyScreenState extends State<SendMoneyScreen> {
 // ============================================================================
 
 class AgentCashOutScreen extends StatefulWidget {
-  const AgentCashOutScreen({super.key, required this.currentBalance});
-  final int currentBalance;
+  const AgentCashOutScreen({super.key});
 
   @override
   State<AgentCashOutScreen> createState() => _AgentCashOutScreenState();
@@ -1715,24 +1838,23 @@ class _AgentCashOutScreenState extends State<AgentCashOutScreen> {
       );
       return;
     }
-    if (amount > widget.currentBalance) {
+    final wallet = context.read<WalletState>();
+    if (amount > wallet.balance) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Insufficient balance for cash-out!')),
       );
       return;
     }
 
-    final uid = FirebaseBackend.instance.currentUser?.uid;
-    if (uid == null) return;
-
     setState(() => _busy = true);
     try {
-      await FirebaseBackend.instance.addTransaction(uid, {
-        'title': 'Cash out at MoMo agent',
-        'amount': amount,
-        'isIn': false,
-        'createdAt': DateTime.now(),
-      });
+      await wallet.add(TransactionItem(
+        id: '',
+        title: 'Cash out at MoMo agent',
+        amount: amount,
+        isIn: false,
+        createdAt: DateTime.now(),
+      ));
 
       if (mounted) {
         Navigator.pop(context);
