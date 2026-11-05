@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../models/txn.dart';
@@ -19,6 +22,7 @@ class _TxnFormState extends State<TxnForm> {
   late final TextEditingController _amountController;
   late bool _isIn;
   bool _busy = false;
+  File? _photo; // picked receipt on phone, not uploaded yet
 
   @override
   void initState() {
@@ -37,6 +41,41 @@ class _TxnFormState extends State<TxnForm> {
     super.dispose();
   }
 
+  Future<void> _pickPhoto(ImageSource source) async {
+    final picked = await ImagePicker().pickImage(
+      source: source,
+      maxWidth: 1200,
+      imageQuality: 70,
+    );
+    if (picked == null) return;
+    setState(() => _photo = File(picked.path));
+  }
+
+  Widget _photoPreview() {
+    if (_photo != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.file(_photo!, height: 180, fit: BoxFit.cover),
+      );
+    }
+    final saved = widget.txn?.photoUrl;
+    if (saved != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.network(
+          saved,
+          height: 180,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stack) => const SizedBox(
+            height: 180,
+            child: Center(child: Icon(Icons.broken_image)),
+          ),
+        ),
+      );
+    }
+    return const SizedBox.shrink();
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     // Read the brain before any await
@@ -46,10 +85,16 @@ class _TxnFormState extends State<TxnForm> {
 
     setState(() => _busy = true);
     try {
+      String? photoUrl = widget.txn?.photoUrl;
+      if (_photo != null) {
+        photoUrl = await wallet.uploadPhoto(_photo!);
+      }
+
       final txn = Txn(
         description: description,
         amount: amount,
         isIn: _isIn,
+        photoUrl: photoUrl,
       );
 
       if (widget.txn == null) {
@@ -63,7 +108,7 @@ class _TxnFormState extends State<TxnForm> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(widget.txn == null
-                ? 'Transaction saved through state repository'
+                ? 'Transaction and receipt saved'
                 : 'Transaction updated'),
           ),
         );
@@ -72,8 +117,9 @@ class _TxnFormState extends State<TxnForm> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text('Failed to save: $e'),
-              backgroundColor: Colors.red),
+            content: Text('Failed to save: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
@@ -84,7 +130,6 @@ class _TxnFormState extends State<TxnForm> {
   @override
   Widget build(BuildContext context) {
     final isEditing = widget.txn != null;
-    // Step 16: Live balance watched from the central brain
     final balance = context.watch<WalletState>().balance;
 
     return Scaffold(
@@ -99,7 +144,7 @@ class _TxnFormState extends State<TxnForm> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Step 16 Live Balance Banner
+                // Live Balance Banner
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -173,7 +218,35 @@ class _TxnFormState extends State<TxnForm> {
                     return null;
                   },
                 ),
+                const SizedBox(height: 16),
+
+                // Receipt Photo Section
+                _photoPreview(),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed:
+                            _busy ? null : () => _pickPhoto(ImageSource.camera),
+                        icon: const Icon(Icons.photo_camera),
+                        label: const Text('Camera'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _busy
+                            ? null
+                            : () => _pickPhoto(ImageSource.gallery),
+                        icon: const Icon(Icons.photo_library),
+                        label: const Text('Gallery'),
+                      ),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 24),
+
                 FilledButton(
                   onPressed: _busy ? null : _save,
                   style: FilledButton.styleFrom(

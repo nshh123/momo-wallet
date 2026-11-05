@@ -1,12 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
 import '../models/txn.dart';
+import '../repositories/photo_repository.dart';
 import '../repositories/txn_repository.dart';
 
 class WalletState extends ChangeNotifier {
-  WalletState(this._repo) {
+  WalletState(this._repo, this._photos) {
     debugPrint('Brain born for ${_repo.uid}');
     // Born: open the pipe to the backend, once.
     _subscription = _repo.watchAll().listen(
@@ -25,6 +27,7 @@ class WalletState extends ChangeNotifier {
   }
 
   final TxnRepository _repo;
+  final PhotoRepository _photos;
   StreamSubscription<List<Txn>>? _subscription;
 
   // The data: private, so only the brain can change it.
@@ -64,6 +67,9 @@ class WalletState extends ChangeNotifier {
     _filter = value;
     notifyListeners();
   }
+
+  // Photo upload action for Session 8
+  Future<String> uploadPhoto(File photo) => _photos.upload(photo);
 
   // Actions: the brain hands the job to the repository.
   Future<void> add(Txn txn) => _repo.add(txn);

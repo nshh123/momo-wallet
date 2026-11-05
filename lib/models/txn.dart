@@ -7,6 +7,7 @@ class Txn {
     required this.amount,
     required this.isIn,
     this.createdAt,
+    this.photoUrl,
   });
 
   final String id;
@@ -14,11 +15,13 @@ class Txn {
   final int amount;
   final bool isIn;
   final DateTime? createdAt;
+  final String? photoUrl;
 
   Map<String, dynamic> toMap() => {
         'description': description,
         'amount': amount,
         'isIn': isIn,
+        'photoUrl': photoUrl,
       };
 
   factory Txn.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -29,6 +32,7 @@ class Txn {
       amount: (data['amount'] as num).toInt(),
       isIn: data['isIn'] as bool,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+      photoUrl: data['photoUrl'] as String?,
     );
   }
 }

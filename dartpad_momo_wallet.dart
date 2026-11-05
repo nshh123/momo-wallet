@@ -59,6 +59,7 @@ class FirebaseBackend {
         'amount': 4000,
         'isIn': true,
         'createdAt': DateTime.now().subtract(const Duration(hours: 1)),
+        'photoUrl': 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
       },
       {
         'id': 'tx_2',
@@ -311,6 +312,7 @@ class TransactionItem {
     required this.amount,
     required this.isIn,
     required this.createdAt,
+    this.photoUrl,
   });
 
   final String id;
@@ -318,11 +320,13 @@ class TransactionItem {
   final int amount;
   final bool isIn;
   final DateTime createdAt;
+  final String? photoUrl;
 
   Map<String, dynamic> toMap() => {
         'title': title,
         'amount': amount,
         'isIn': isIn,
+        'photoUrl': photoUrl,
       };
 
   factory TransactionItem.fromDoc(MockDocumentSnapshot doc) {
@@ -333,6 +337,7 @@ class TransactionItem {
       amount: (data['amount'] as num).toInt(),
       isIn: data['isIn'] as bool,
       createdAt: (data['createdAt'] as DateTime?) ?? DateTime.now(),
+      photoUrl: data['photoUrl'] as String?,
     );
   }
 }
@@ -1279,14 +1284,18 @@ class _WalletScreenState extends State<WalletScreen> {
                 side: BorderSide(color: Colors.grey[200]!),
               ),
               child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor:
-                      isPlus ? Colors.green[50] : Colors.red[50],
-                  child: Icon(
-                    isPlus ? Icons.arrow_downward : Icons.arrow_upward,
-                    color: isPlus ? Colors.green[700] : Colors.red[700],
-                  ),
-                ),
+                leading: tx.photoUrl == null
+                    ? CircleAvatar(
+                        backgroundColor:
+                            isPlus ? Colors.green[50] : Colors.red[50],
+                        child: Icon(
+                          isPlus ? Icons.arrow_downward : Icons.arrow_upward,
+                          color: isPlus ? Colors.green[700] : Colors.red[700],
+                        ),
+                      )
+                    : CircleAvatar(
+                        backgroundImage: NetworkImage(tx.photoUrl!),
+                      ),
                 title: Text(
                   tx.title,
                   style: const TextStyle(fontWeight: FontWeight.w600),
@@ -1438,6 +1447,7 @@ class _TxnEditFormState extends State<TxnEditForm> {
   late final TextEditingController _amountController;
   late bool _isIn;
   bool _busy = false;
+  String? _photoUrl;
 
   @override
   void initState() {
@@ -1447,6 +1457,39 @@ class _TxnEditFormState extends State<TxnEditForm> {
     _amountController = TextEditingController(
         text: widget.txn != null ? widget.txn!.amount.toString() : '');
     _isIn = widget.txn?.isIn ?? true;
+    _photoUrl = widget.txn?.photoUrl;
+  }
+
+  Widget _photoPreview() {
+    if (_photoUrl != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.network(
+              _photoUrl!,
+              height: 180,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stack) => const SizedBox(
+                height: 180,
+                child: Center(child: Icon(Icons.broken_image)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () => setState(() => _photoUrl = null),
+              icon: const Icon(Icons.delete_outline, size: 16, color: Colors.red),
+              label: const Text('Remove receipt', style: TextStyle(color: Colors.red, fontSize: 12)),
+            ),
+          ),
+        ],
+      );
+    }
+    return const SizedBox.shrink();
   }
 
   @override
@@ -1470,6 +1513,7 @@ class _TxnEditFormState extends State<TxnEditForm> {
           amount: amount,
           isIn: _isIn,
           createdAt: DateTime.now(),
+          photoUrl: _photoUrl,
         ));
       } else {
         await wallet.edit(
@@ -1480,6 +1524,7 @@ class _TxnEditFormState extends State<TxnEditForm> {
             amount: amount,
             isIn: _isIn,
             createdAt: widget.txn!.createdAt,
+            photoUrl: _photoUrl,
           ),
         );
       }
@@ -1593,7 +1638,35 @@ class _TxnEditFormState extends State<TxnEditForm> {
                     return null;
                   },
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 16),
+                _photoPreview(),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _busy
+                            ? null
+                            : () => setState(() => _photoUrl =
+                                'https://res.cloudinary.com/demo/image/upload/sample.jpg'),
+                        icon: const Icon(Icons.photo_camera),
+                        label: const Text('Camera'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _busy
+                            ? null
+                            : () => setState(() => _photoUrl =
+                                'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=400&auto=format&fit=crop&q=80'),
+                        icon: const Icon(Icons.photo_library),
+                        label: const Text('Gallery'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
                 FilledButton(
                   onPressed: _busy ? null : _save,
                   style: FilledButton.styleFrom(

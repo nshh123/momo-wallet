@@ -460,15 +460,21 @@ class WalletScreen extends StatelessWidget {
                       side: BorderSide(color: Colors.grey.shade200),
                     ),
                     child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: isPlus
-                            ? Colors.green.shade50
-                            : Colors.red.shade50,
-                        child: Icon(
-                          isPlus ? Icons.arrow_downward : Icons.arrow_upward,
-                          color: isPlus ? Colors.green : Colors.red,
-                        ),
-                      ),
+                      leading: t.photoUrl == null
+                          ? CircleAvatar(
+                              backgroundColor: isPlus
+                                  ? Colors.green.shade50
+                                  : Colors.red.shade50,
+                              child: Icon(
+                                isPlus
+                                    ? Icons.arrow_downward
+                                    : Icons.arrow_upward,
+                                color: isPlus ? Colors.green : Colors.red,
+                              ),
+                            )
+                          : CircleAvatar(
+                              backgroundImage: NetworkImage(t.photoUrl!),
+                            ),
                       title: Text(
                         t.description,
                         style: const TextStyle(fontWeight: FontWeight.w600),

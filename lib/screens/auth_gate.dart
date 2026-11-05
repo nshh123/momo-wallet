@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../repositories/photo_repository.dart';
 import '../repositories/txn_repository.dart';
 import '../state/wallet_state.dart';
 import 'login_screen.dart';
@@ -24,9 +25,12 @@ class AuthGate extends StatelessWidget {
         if (user == null) {
           return const LoginScreen();
         }
-        // Signed in: one brain for this user, given to the wallet screen.
+        // Signed in: one brain for this user, given both repositories.
         return ChangeNotifierProvider<WalletState>(
-          create: (_) => WalletState(TxnRepository(user.uid)),
+          create: (_) => WalletState(
+            TxnRepository(user.uid),
+            PhotoRepository(),
+          ),
           child: const WalletScreen(),
         );
       },
