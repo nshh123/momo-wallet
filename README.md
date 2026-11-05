@@ -5,8 +5,10 @@
 Track the money you send and receive, with a photo of every receipt, on any phone you log in from.
 
 ## Download
-[Download the latest APK](https://github.com/nshh123/momo-wallet/releases/latest)  
-*(for Android phones)*
+
+| Direct Download Link | Scan to Download on Phone |
+|:---:|:---:|
+| [📱 **Download Latest APK**](https://github.com/nshh123/momo-wallet/releases/latest)<br>*(for Android phones)* | <img src="screenshots/download_qr.png" width="160" alt="Scan QR code to download MoMo Wallet APK" /> |
 
 ## Features
 - Create an account and log in with secure Firebase Authentication
