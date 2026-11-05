@@ -1,36 +1,41 @@
 # MoMo Wallet
 
-A mobile money wallet simulation app inspired by MTN Mobile Money in Rwanda. It signs users in with Firebase Authentication, and each user's data is saved in Cloud Firestore under their own id, so two accounts never see each other's data, and every change appears live.
+![MoMo Wallet](screenshots/home.png)
+
+Track the money you send and receive, with a photo of every receipt, on any phone you log in from.
+
+## Download
+[Download the latest APK](https://github.com/nshh123/momo-wallet/releases/latest)  
+*(for Android phones)*
+
+## Features
+- Create an account and log in with secure Firebase Authentication
+- Add, edit, and delete transactions with receipt photos
+- Live real-time balance calculations across devices
+- Quick filter chips: All, Money In (+), Money Out (-)
+- Private per-user Cloud Firestore storage enforced by server-side security rules
 
 ## Screenshots
+| Login | Wallet | New Transaction |
+|:---:|:---:|:---:|
+| ![Login](screenshots/login.png) | ![Wallet](screenshots/home.png) | ![Form](screenshots/form.png) |
 
-- Login: <br>![Login](screenshots/login.png)
-- My data in Firestore: ![My data in Firestore](screenshots/console.png)
-- Live update: ![Live update](screenshots/live.png)
-- Second account sees nothing of mine: <br>![Second account sees nothing of mine](screenshots/denied.png)
+## How It's Built
+- **Flutter** with **Provider** for clean reactive state management
+- **Firebase Authentication** & **Cloud Firestore** for backend persistence
+- **Cloudinary** for scalable receipt image hosting with HTTP multipart uploads
+- **Clean 4-Layer Architecture**:
+  - `models/`: Immutable domain models (`Txn`)
+  - `repositories/`: Backend services (`TxnRepository`, `PhotoRepository`)
+  - `state/`: Single source of truth state container (`WalletState`)
+  - `screens/`: Reactive user interfaces (`AuthGate`, `LoginScreen`, `WalletScreen`, `TxnForm`)
 
----
+## Run It Yourself
+1. Clone the repository: `git clone https://github.com/nshh123/momo-wallet.git`
+2. Install dependencies: `flutter pub get`
+3. Connect your Firebase project (`android/app/google-services.json`)
+4. Configure your Cloudinary cloud name & upload preset in `lib/repositories/photo_repository.dart`
+5. Run the app: `flutter run`
 
-## Architecture & Implementation Overview
-
-### 1. Server-Side Security Rules (Habit 1: Never Trust the Client)
-All user data lives under `users/{userId}/transactions`. The rules run on Google's servers and check every read and write:
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Each user can only read and write their own data
-    match /users/{userId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-    }
-  }
-}
-```
-
-### 2. Facts vs Computations (Habit 2: Save Facts. Compute the Rest.)
-Only atomic events are persisted (`title`, `amount`, `isIn`, `createdAt`). The available balance, total money in, total money out, and lowest balance are never saved in the database; they are dynamically computed every time the data stream emits a new snapshot.
-
-### 3. Reactive Streams
-The interface is entirely reactive without manual `setState()` calls for remote data:
-- `FirebaseAuth.instance.authStateChanges()` continuously delivers the user session to `AuthGate`.
-- `myTransactions().snapshots()` pipes real-time Firestore database updates straight to the UI.
+## Author
+**nshh123**: [GitHub Profile](https://github.com/nshh123)
